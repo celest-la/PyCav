@@ -1,0 +1,10 @@
+[project]
+name = "PyCav"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "deepinv>=0.3.7",
+    "scipy>=1.16.3",
+]
