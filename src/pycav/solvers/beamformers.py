@@ -15,6 +15,8 @@ class DAS(BaseFrequencySolver):
     def solve(self, csm, freqs, average=True):
         """Prend la CSM déjà calculée en entrée"""
         a = self.get_steering_vectors(freqs)
+        #vec_a = torch.linalg.vector_norm(a)
+        a = a / torch.linalg.vector_norm(a)
         # Image = diag(A^H * CSM * A)
         img = torch.einsum('fpi,fij,fpj->fp', a.conj(), csm, a).real
         return img.mean(dim=0) if average else img
@@ -106,9 +108,9 @@ class FB(BaseFrequencySolver):
         """
         # 1. Récupération des Steering Vectors [F, P, M]
         a = self.get_steering_vectors(freqs)
+        a = a / torch.linalg.vector_norm(a)
  
         L, V = torch.linalg.eig(csm)
-
         if r != 0:
             # On élève chaque valeur propre à la puissance 1/r
             L_pow = L**(1/r)
@@ -121,13 +123,8 @@ class FB(BaseFrequencySolver):
   
             # 5. Puissance finale element-wise sur l'image
             img = quad_form**r
-       # inner_prod = torch.abs(proj)**2  # [F, P, M]
 
-        # 4. Application de la méthode selon 'r'
         else:
-            # --- Cas r=0 : LOG-EUCLIDEAN (Ton MATLAB if r==0) ---
-            # Formule : exp( a' * (U * log(L) * U') * a )
-            # = exp( sum( log(L) * |U'*a|^2 ) )
             L_log = torch.log(L)
             W = torch.einsum('fmi,fi,fni->fmn', V, L_log, V.conj())
             log_form = torch.einsum('fpi,fij,fpj->fp', a.conj(), W, a).real

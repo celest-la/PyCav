@@ -1,7 +1,7 @@
 [project]
 name = "PyCav"
 version = "0.1.0"
-description = "Add your description here"
+description = "PyCav is a project aiming to group tools for Passive cavitation imaging, spanning from simulations of RF signals to reconstruction with diverse methods. It also integrates diverse metrics that are current for evaluating passive cavitation imaging methods."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

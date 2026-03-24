@@ -21,9 +21,9 @@ c0 = 1540
 source_pos = torch.tensor([0.002, 0.0, 0.02], device=device) # Source décalée à x=2mm, z=20mm
 
 # Calcul des délais théoriques entre la source et chaque élément de la sonde
-dist_source = torch.norm(probe.positions - source_pos, p=2, dim=-1)
+dist_source = torch.linalg.vector_norm(probe.positions - source_pos,dim=-1)
 # Signal complexe reçu sur chaque capteur (vecteur de phase)
-X = torch.exp(-1j * 2 * torch.pi * f_source * dist_source / c0)
+X = 1*torch.exp(-1j * 2 * torch.pi * f_source * dist_source / c0)
 
 # Génération de la CSM théorique (Produit extérieur)
 # On rajoute une dimension pour simuler le batch de fréquences [F=1, M, M]
