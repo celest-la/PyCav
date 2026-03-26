@@ -1,4 +1,5 @@
 import torch
+import numpy
 from pycav.physics.propagation import compute_steering_vectors
 
 
@@ -49,16 +50,14 @@ class getPositions:
         if angle == None:
             angle = 360 * torch.rand(1)
         angle_rad = torch.as_tensor(angle * torch.pi/180)
-        cos_a = torch.cos(angle_rad)
-        sin_a = torch.sin(angle_rad)
+        cos_a = torch.cos(angle_rad,dtype=torch.float64)
+        sin_a = torch.sin(angle_rad,dtype=torch.float64)
         
         # Matrice de rotation 2D
-        R = torch.stack([
-            torch.stack([cos_a, -sin_a]),
-            torch.stack([sin_a, cos_a])
-            ]).reshape(2, 2)
-        pos_rotated = torch.matmul(pos_temp2, R.t()) + center    
-        return  pos_rotated, center, x_size, z_size, angle
+        R = torch.tensor([[cos_a, -sin_a],
+            [sin_a, cos_a]])
+        bubbles_pos = torch.matmul(pos_temp2, R.t()) + center    
+        return  bubbles_pos, center, x_size, z_size, angle
 
 class BubbleSource:
     def __init__(self, probe, bubble_positions, c=1540):
@@ -80,5 +79,22 @@ class inertial(BubbleSource):
         pass
 
 class Simulator:
-    def __init__(self):
-        pass
+    def __init__(self,probe,bubble_positions, c=1540,fhifu=1e6, device="cpu"):
+        self.probe=probe
+        self.bubble_positions=bubble_positions
+        self.c=c
+        self.fhifu=fhifu
+        self.nb = bubble_positions.shape[0]
+        self.device = device
+class Dirac_Simulator(Simulator):
+    def get_delayed_dirac(self, n_cycles,A0):
+        # Delay operation
+        t_delay=torch.cdist(self.probe.positions,self.bubble_positions,p=2)
+        index_tau=t_delay/self.c0*self.probe.fs
+
+        # Create the dirac
+        amplitudes = A0 + 0.1*torch.rand(n_cycles,self.nb)
+        index_dirac = (torch.arange(n_cycles, device=self.device).float()+0.5) * self.probe.fs/self.fhifu
+        t_final = index_tau.unsqueeze(-1) + index_dirac.view(1, 1, -1)
+
+

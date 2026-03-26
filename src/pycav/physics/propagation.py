@@ -1,9 +1,7 @@
 import torch
 
 def compute_steering_vectors(probe, grid, freqs, c0=1540):
-    """
-    Traduction directe de ta logique MATLAB en PyTorch optimisé.
-    """
+    
     # 1. Calcul de la matrice de distance [Pixels x Eléments]
     # Remplace sqrt((X-xp)^2 + (Z-zp)^2)
     dist = torch.cdist(grid.positions, probe.positions, p=2)
@@ -20,3 +18,11 @@ def compute_steering_vectors(probe, grid, freqs, c0=1540):
     A = torch.exp(-2j * torch.pi * f * tau.unsqueeze(0))
     
     return A.to(torch.complex64)
+
+def compute_delay(probe, grid_positions, c0=1540):
+    # 1. Calcul de la matrice de distance [Pixels x Eléments]
+    # grid_position peut être une grille ou des bulles (cas de la simulation)
+    dist = torch.cdist(grid_positions, probe.positions, p=2)
+
+    # 2. Calcul des indices (brut, sans interpolation)
+    return dist / c0 * probe.fs

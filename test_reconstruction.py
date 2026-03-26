@@ -16,7 +16,7 @@ probe = Probe.from_linear(n_el=128, pitch=0.3e-3, device=device)
 grid = Grid.from_limits(x_lim=(-0.01, 0.01), z_lim=(0.01, 0.03), step=0.0002, device=device)
 
 # 2. SIMULATION D'UNE SOURCE (La "Vérité")
-f_source = 2e6  # 2 MHz
+f_source = 1e6  # 2 MHz
 c0 = 1540
 source_pos = torch.tensor([0.002, 0.0, 0.02], device=device) # Source décalée à x=2mm, z=20mm
 
