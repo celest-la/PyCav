@@ -1,8 +1,9 @@
 # %%
-import torch
+import torch as torch
 import matplotlib.pyplot as plt
 from pycav.core.probe import Probe
 from pycav.core.grid import Grid
+import numpy as np
 #from pycav.solvers.beamformers import DAS, RCB, FB,RCB_Li
 
 
@@ -16,10 +17,10 @@ probe = Probe.from_linear(n_el=128, pitch=0.3e-3, device=device)
 # Création d'une grille de recherche (2cm x 2cm à partir de 1cm de profondeur)
 grid = Grid.from_limits(x_lim=(-0.01, 0.01), z_lim=(0.01, 0.03), step=0.0002, device=device)
 
-fhifu = 1.2e6  # 2 MHz
+fhifu = 1e6  # 2 MHz
 c0 = 1540
-bubble_positions = torch.tensor([[0.002, 0.0, 0.02]
-                          ,[0.003, 0.0, 0.022]], device=device) # Source décalée à x=2mm, z=20mm
+bubble_positions = torch.tensor([[0.002, 0.0, 0.02],
+                          [0.004,0.0,0.02]], device=device) # Source décalée à x=2mm, z=20mm
 
 # %%
 A0 = 1
@@ -41,7 +42,6 @@ t_temp = index_tau.unsqueeze(-1) + index_dirac.view(1, 1, -1)
 
 
 tau_final = torch.permute(t_temp, (0,2,1))
-# %%
 n_samples = int(t_acq*probe.fs)
 dirac_RF = torch.zeros(n_samples,nelem)
 
@@ -78,8 +78,25 @@ vals_c = val_ceil.reshape(-1)
 mask_f = (t_idx_f >= 0) & (t_idx_f < n_samples)
 mask_c = (t_idx_c >= 0) & (t_idx_c < n_samples)
 
-# %% 4. Splatting final
+# %% 
+# 4. Splatting final
 # Attention : dirac_RF est (n_samples, nelem)
 # Donc l'indexation est (temps, element)
 dirac_RF.index_put_((t_idx_f[mask_f], elem_idx[mask_f]), vals_f[mask_f], accumulate=True)
 dirac_RF.index_put_((t_idx_c[mask_c], elem_idx[mask_c]), vals_c[mask_c], accumulate=True)
+
+
+# %%
+# On choisit l'élément central (ex: 64 sur 128)
+channel = 64
+rf_line = dirac_RF[1000:1400, channel].cpu().numpy() # .cpu() si tu es sur GPU
+n_samples = dirac_RF.shape[0]
+time_axis = np.arange(n_samples) / probe.fs * 1e6
+plt.figure(figsize=(10, 4))
+plt.plot(time_axis[1000:1400], rf_line)
+plt.title(f"Signal RF - Élément {channel}")
+plt.xlabel("microsecondes (µs)")
+plt.ylabel("Amplitude")
+plt.grid(True)
+plt.show()
+# %%

@@ -1,10 +1,10 @@
 import torch
 
-def compute_steering_vectors(probe, grid, freqs, c0=1540):
+def compute_steering_vectors(probe, grid_positions, freqs, c0=1540):
     
     # 1. Calcul de la matrice de distance [Pixels x Eléments]
     # Remplace sqrt((X-xp)^2 + (Z-zp)^2)
-    dist = torch.cdist(grid.positions, probe.positions, p=2)
+    dist = torch.cdist(grid_positions, probe.positions, p=2)
     
     # 2. Calcul des délais [Pixels x Eléments]
     tau = dist / c0

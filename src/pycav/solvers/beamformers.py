@@ -9,14 +9,15 @@ class BaseFrequencySolver:
 
     def get_steering_vectors(self, freqs):
         """Récupère A [F, P, M]"""
-        return compute_steering_vectors(self.probe, self.grid, freqs, self.c)
+        return compute_steering_vectors(self.probe, self.grid.positions, freqs, self.c)
 
 class DAS(BaseFrequencySolver):
     def solve(self, csm, freqs, average=True):
         """Prend la CSM déjà calculée en entrée"""
         a = self.get_steering_vectors(freqs)
         #vec_a = torch.linalg.vector_norm(a)
-        a = a / torch.linalg.vector_norm(a)
+        #a = a / torch.linalg.vector_norm(a, dim=-1, keepdim=True)
+        a= a/torch.tensor(self.probe.positions.shape[0])
         # Image = diag(A^H * CSM * A)
         img = torch.einsum('fpi,fij,fpj->fp', a.conj(), csm, a).real
         return img.mean(dim=0) if average else img
@@ -108,27 +109,33 @@ class FB(BaseFrequencySolver):
         """
         # 1. Récupération des Steering Vectors [F, P, M]
         a = self.get_steering_vectors(freqs)
-        a = a / torch.linalg.vector_norm(a)
- 
+        #a = a / torch.linalg.vector_norm(a, dim=-1, keepdim=True)
+        #a=a/torch.tensor(self.probe.positions.shape[0])
+        norm = torch.linalg.vector_norm(a, dim=-1, keepdim=True)
+        a = a / norm
         L, V = torch.linalg.eig(csm)
+        L = torch.clamp(L.real, min=1e-20)
+        proj = torch.einsum('fpm,fmi->fpi', a.conj(), V)
         if r != 0:
             # On élève chaque valeur propre à la puissance 1/r
+
             L_pow = L**(1/r)
             
             # 3. Reconstruction de la matrice de poids W
-            W = torch.einsum('fmi,fi,fni->fmn', V, L_pow, V.conj())
+            #W = torch.einsum('fmi,fi,fni->fmn', V, L_pow, V.conj())
             
             # 4. Calcul de la forme quadratique a^H * W * a
-            quad_form = torch.einsum('fpi,fij,fpj->fp', a.conj(), W, a).real
-  
+            #quad_form = torch.einsum('fpi,fij,fpj->fp', a.conj(), W, a).real
+            quad_form = torch.einsum('fpi,fi,fpi->fp', proj, L_pow, proj.conj()).real
             # 5. Puissance finale element-wise sur l'image
-            img = quad_form**r
+            img= (quad_form**r)/self.probe.positions.shape[0]
 
         else:
             L_log = torch.log(L)
             W = torch.einsum('fmi,fi,fni->fmn', V, L_log, V.conj())
             log_form = torch.einsum('fpi,fij,fpj->fp', a.conj(), W, a).real
-            img = torch.exp(log_form)
+            img = torch.exp(log_form)/self.probe.positions.shape[0]
+
 
             
 

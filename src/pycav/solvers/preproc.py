@@ -88,7 +88,7 @@ def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
     
     # Produit extérieur batché : (bin, snap, Ne, 1) x (bin, snap, 1, Ne)
     # On moyenne sur la dimension 'snap' (n_snapshots)
-    csm_per_bin = torch.einsum('bse,bsm->bee', S, S.conj()) / n_snapshots
+    csm_per_bin = torch.einsum('bse,bsm->bem', S, S.conj()) / n_snapshots
     
     # Si nBin > 1, on regroupe et on moyenne par fréquence cible
     if n_bin > 1:
@@ -99,7 +99,7 @@ def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
         # On prend la fréquence centrale pour le steering vector
         axf_final = axf[:, n_bin // 2] 
     else:
-        csm = csm_per_bin
+        csm_final = csm_per_bin
         axf_final = axf.flatten()
 
     return csm_final, axf_final

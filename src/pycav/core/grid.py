@@ -51,5 +51,5 @@ class Grid:
         z_coords = torch.arange(z_start, z_end + step, step)
         return cls(x_coords, z_coords, device=device)
     
-  # À ajouter dans src/pycav/core/probe.py
+
 
