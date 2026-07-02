@@ -54,13 +54,15 @@ class Probe:
     
     
     @classmethod
-    def from_linear(cls, n_el: int = 128, pitch: float = 0.3, fs: float = 22e6, device="cpu",fc: torch.tensor = torch.tensor([4.5*1e6,7.5*1e6])):
+    def from_linear(cls, n_el: int = 128, pitch: float = 0.3, fs: float = 22e6, device="cpu",fc: torch.tensor = None):
         """
         Crée une sonde linéaire centrée sur x=0.
         n_el  : Nombre d'éléments (ex: 128)
         pitch : Espacement entre les centres des éléments en mètres (ex: 0.3e-3)
         fs    : Fréquence d'échantillonnage (par défaut 22MHz)
         """
+        if fc is None:
+            fc = torch.tensor([4.5e6, 7.5e6], dtype=torch.float32) # ICI
         # Calcul des positions en X pour que la sonde soit centrée
         # (Ex: pour 2 éléments à pitch 0.3, on aura -0.15 et +0.15)
         x = (torch.arange(n_el) - (n_el - 1) / 2) * pitch

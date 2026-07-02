@@ -5,6 +5,7 @@ from scipy.signal import butter, sosfiltfilt
 
 class getPositions:
     @classmethod
+    @torch.no_grad()
     def random_ellipse(cls,x_position_lim = 0e-3, z_position_lim = 20e-3, x_size_lim = 1e-3, z_size_lim = 1e-3, angle = 0, density=100):
 
        ### Calculation of the size of the z axis of the ellipse
@@ -37,9 +38,9 @@ class getPositions:
         else:
             raise ValueError("z_position_lim should be of size 1 or 2")    
 
-        center = torch.tensor([x_center, z_center])
+        center = torch.tensor([x_center, z_center],dtype=torch.float32)
         
-        ellipse_axes = torch.tensor([x_size, z_size])
+        ellipse_axes = torch.tensor([x_size, z_size],dtype=torch.float32)
         
         number_bubble = int(torch.round(x_size * z_size * density * 1e6).item())
         
@@ -55,8 +56,7 @@ class getPositions:
         sin_a = torch.sin(angle_rad)
         
         # Matrice de rotation 2D
-        R = torch.tensor([[cos_a, -sin_a],
-            [sin_a, cos_a]])
+        R = torch.tensor([[cos_a, -sin_a], [sin_a, cos_a]], dtype=torch.float32)
         bubbles_pos = torch.matmul(pos_temp2, R.t()) + center
         y=torch.zeros(bubbles_pos.shape[0],1)
         bubbles_pos = torch.cat([bubbles_pos, y], dim=1)
@@ -79,7 +79,7 @@ class Stable(BubbleSource):
         self.fs = fs
         self.f_hifu = f_hifu
         self.device = device
-
+    @torch.no_grad()
     def get_kernel(self, alpha=1.0, beta=0.8, delta=0.1):
         """
         alpha/beta : asymétrie expansion/compression (génère les harmoniques 2f, 3f)
@@ -87,10 +87,10 @@ class Stable(BubbleSource):
         """
         T = 1 / self.f_hifu
         # On génère exactement 2 cycles
-        t = torch.arange(0, 2 * T, 1/self.fs, device=self.device)
+        t = torch.arange(0, 2 * T, 1/self.fs, device=self.device, dtype=torch.float32)
 
         if t.shape[0] % 2 == 0:
-            t = torch.arange(0, 2 * T + 1/self.fs, 1/self.fs, device=self.device)
+            t = torch.arange(0, 2 * T + 1/self.fs, 1/self.fs, device=self.device, dtype=torch.float32)
 
 
         s = torch.sin(2 * torch.pi * self.f_hifu * t)
@@ -104,7 +104,7 @@ class Stable(BubbleSource):
         kernel[mask_cycle2] *= (1 - delta)
         
         # Fenêtrage
-        window = torch.hann_window(len(t), periodic=False, device=self.device)
+        window = torch.hann_window(len(t), periodic=False, device=self.device, dtype=torch.float32)
         return (kernel * window) / torch.norm(kernel * window)
 
 class StableSimulator:
@@ -115,13 +115,13 @@ class StableSimulator:
         self.fhifu = fhifu
         self.nb = bubble_positions.shape[0]
         self.device = device
-
+    @torch.no_grad()
     def _compute_batch_delays(self, batch_pos, t0):
         """Calcule les index de délais pour un groupe de bulles."""
         # dist: (Nelem, Batch_Nb)
         dist = torch.cdist(self.probe.positions, batch_pos, p=2)
         return (dist / self.c0) * self.probe.fs + t0
-
+    @torch.no_grad()
     def _get_source_events(self, n_cycles, batch_nb, A0, sd, subharmonic=True):
         # Si subharmonic, on veut une impulsion tous les 2 cycles HIFU
         step = 2 if subharmonic else 1
@@ -129,14 +129,14 @@ class StableSimulator:
         T_samples = self.probe.fs / self.fhifu
         
         # On crée les indices de temps : 0.5, 2.5, 4.5... au lieu de 0.5, 1.5, 2.5...
-        t_emit = (torch.arange(0, n_cycles, step, device=self.device).float() + 0.5) * T_samples
+        t_emit = (torch.arange(0, n_cycles, step, device=self.device, dtype=torch.float32).float() + 0.5) * T_samples
         
         # Le nombre d'amplitudes doit correspondre au nombre de Diracs générés
         n_pulses = t_emit.shape[0]
-        amps = A0 + sd * torch.randn(n_pulses, batch_nb, device=self.device)
+        amps = A0 + sd * torch.randn(n_pulses, batch_nb, device=self.device, dtype=torch.float32)
         
         return t_emit, amps
-
+    @torch.no_grad()
     def _splat_linear(self, rf_grid, t_arrival, amplitudes):
         """Projette les impacts sur la grille RF (Samples x Nelem)."""
         n_samples, nelem = rf_grid.shape
@@ -162,7 +162,7 @@ class StableSimulator:
                 (a_flat * weight)[mask], 
                 accumulate=True
             )
-
+    @torch.no_grad()
     def get_delayed_dirac(self, n_cycles, A0=1, t0=0, t_acq=100e-6, sd=0.1, batch_size=1000):
         """Fonction principale avec gestion du batching."""
         nelem = self.probe.positions.shape[0]
@@ -192,7 +192,7 @@ class StableSimulator:
             
         return dirac_RF
 
-
+    @torch.no_grad()
     def apply_kernel(self, dirac_rf, kernel):
         """
         Applique le kernel de cavitation sur la matrice de Diracs.
@@ -219,28 +219,45 @@ class StableSimulator:
         return rf_conv.squeeze(0).t()
 
     
-
     def apply_probe_filter(self, rf_tensor):
-        """
-        Applique la réponse fréquentielle de la sonde L7-5.
-        f_center : 5.5 MHz
-        """
+        """Filtrage passe-bande 100% GPU (Zero-phase)"""
+        n = rf_tensor.shape[0]
+        fft_rf = torch.fft.rfft(rf_tensor, dim=0)
+        freqs = torch.fft.rfftfreq(n, d=1/self.probe.fs, device=self.device)
+        
         band = self.probe.fc
-        fs = self.probe.fs
-        nyq = 0.5 * fs
+        mask = (freqs >= band[0]) & (freqs <= band[1])
+        fft_rf[~mask, :] = 0
         
-        # Normalisation par rapport à Nyquist
-        low = band[0] / nyq
-        high = min(band[1] / nyq, 0.95)
-        
-        sos = butter(4, [low, high], btype='band', output='sos')
-        
-        rf_np = rf_tensor.cpu().numpy()
-        # filtfilt est impératif pour ne pas décaler tes fronts de montée (phase linéaire)
-        rf_filt = sosfiltfilt(sos, rf_np, axis=0)
-        
-        return torch.from_numpy(rf_filt.copy()).to(rf_tensor.device)
+        return torch.fft.irfft(fft_rf, n=n, dim=0)
 
+    @torch.no_grad()
+    def simulate(self, n_cycles=200, t_acq=100e-6, A0=1, sd=0.1, 
+                 alpha=1.0, beta=0.5, delta=0.2, 
+                 noise_level=0.001, apply_filter=True, batch_size=1000):
+        """
+        Méthode tout-en-un pour l'utilisateur.
+        Gère la création des Diracs, du Kernel de signature de bulle, le bruit et le filtrage.
+        """
+        # 1. Génération de la matrice des Diracs
+        diracs = self.get_delayed_dirac(n_cycles=n_cycles, A0=A0, t_acq=t_acq, sd=sd, batch_size=batch_size)
+        
+        # 2. Génération automatique du Kernel "Stable" et Convolution
+        k_sub = Stable(self.probe.fs, self.fhifu, device=self.device).get_kernel(alpha=alpha, beta=beta, delta=delta)
+        rf = self.apply_kernel(diracs, k_sub)
+        
+        # 3. Ajout du bruit
+        if noise_level > 0:
+            noise = noise_level * torch.randn_like(rf) * rf.max()
+            rf = rf + noise
+            
+        # 4. Filtrage sonde
+        if apply_filter:
+            rf = self.apply_probe_filter(rf)
+            
+        return rf
+
+        
 class BBagSimulator():
         def __init__(self, probe, bubble_positions, c0=1540, fhifu=1e6, device="cpu"):
             self.probe = probe
@@ -249,6 +266,7 @@ class BBagSimulator():
             self.fhifu = fhifu
             self.nb = bubble_positions.shape[0]
             self.device = device
+        @torch.no_grad()
         def get_RF(self, n_cycles=200, A0=1, t0=0, t_acq=100e-6, batch_size=1000):
             source_signals=A0 * torch.rand((int(n_cycles*self.probe.fs/self.fhifu), self.nb),device=self.device)
             n_bin = n_bin = int(t_acq * self.probe.fs)
@@ -257,24 +275,37 @@ class BBagSimulator():
             steer_vec = compute_steering_vectors(probe=self.probe, grid_positions=self.bubble_positions, freqs=freq, c0=self.c0)
             delayed_fft = torch.einsum('fb,fbe->fe', source_fft, steer_vec)
             return torch.fft.irfft(delayed_fft, n = n_bin, dim = 0)
-        
+
         def apply_probe_filter(self, rf_tensor):
-            """
-            Applique la réponse fréquentielle de la sonde L7-5.
-            f_center : 5.5 MHz
-            """
+            n = rf_tensor.shape[0]
+            # 1. Passage dans le domaine fréquentiel
+            fft_rf = torch.fft.rfft(rf_tensor, dim=0)
+            freqs = torch.fft.rfftfreq(n, d=1/self.probe.fs, device=self.device)
+            
+            # 2. Création du masque (hors de la bande = 0)
             band = self.probe.fc
-            fs = self.probe.fs
-            nyq = 0.5 * fs
+            mask = (freqs >= band[0]) & (freqs <= band[1])
             
-            # Normalisation par rapport à Nyquist
-            low = band[0] / nyq
-            high = min(band[1] / nyq, 0.95)
+            fft_rf[~mask, :] = 0
             
-            sos = butter(2, [low, high], btype='band', output='sos')
+            # 3. Retour dans le domaine temporel
+            return torch.fft.irfft(fft_rf, n=n, dim=0)
+
+        @torch.no_grad()
+        def simulate(self, t_acq=100e-6, n_cycles=200, A0=1, batch_size=1000, noise_level=0.001, apply_filter=True):
+            """
+            Méthode tout-en-un pour l'utilisateur.
+            """
+            # 1. Génération du signal parfait
+            rf = self.get_RF(n_cycles=n_cycles, A0=A0, t_acq=t_acq, batch_size=batch_size)
             
-            rf_np = rf_tensor.cpu().numpy()
-            # filtfilt est impératif pour ne pas décaler tes fronts de montée (phase linéaire)
-            rf_filt = sosfiltfilt(sos, rf_np, axis=0)
-            
-            return torch.from_numpy(rf_filt.copy()).to(rf_tensor.device)
+            # 2. Ajout du bruit d'acquisition
+            if noise_level > 0:
+                noise = noise_level * torch.randn_like(rf) * rf.max()
+                rf = rf + noise
+                
+            # 3. Filtrage par la bande passante de la sonde
+            if apply_filter:
+                rf = self.apply_probe_filter(rf)
+                
+            return rf

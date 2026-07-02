@@ -17,7 +17,7 @@ def compute_steering_vectors(probe, grid_positions, freqs, c0=1540):
     # Le .unsqueeze(0) permet d'aligner tau [1, P, M] avec f [F, 1, 1]
     A = torch.exp(-2j * torch.pi * f * tau.unsqueeze(0))
     
-    return A.to(torch.complex64)
+    return A
 
 def compute_delay(probe, grid_positions, c0=1540):
     # 1. Calcul de la matrice de distance [Pixels x Eléments]

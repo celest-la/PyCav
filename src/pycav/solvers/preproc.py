@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+@torch.no_grad()
 def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
     """
     Calcule la Cross-Spectral Matrix (CSM) par la méthode des snapshots.
@@ -18,10 +19,13 @@ def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
         CSM: [F, Ne, Ne] (Moyennée sur les snapshots)
         axf: Fréquences réelles correspondant aux bins sélectionnés
     """
+    if raw.dtype != torch.float32:
+        raw = raw.to(torch.float32)
+
     fs=probe.fs
     device = raw.device
     Nt, Ne = raw.shape
-    f = torch.as_tensor(f, device=device)
+    f = torch.as_tensor(f, device=device, dtype=torch.float32)
 
     # 1. Définition des variables de fenêtrage (Logique MATLAB)
     nw = int(Nt // (K * (1 - overlap) + overlap))
@@ -42,7 +46,7 @@ def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
     n_zp = int(2**np.ceil(np.log2(n_zp)))
 
     # 3. Identification des bins fréquentiels
-    vec_freq = torch.arange(n_zp, device=device) * (fs / n_zp)
+    vec_freq = torch.arange(n_zp, device=device,dtype=torch.float32) * (fs / n_zp)
     
     # Trouver les indices les plus proches des fréquences f
     # On utilise broadcasting pour comparer toutes les fréquences d'un coup
@@ -61,12 +65,12 @@ def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
 
     # 4. Préparation de la fenêtre (Tukey/Hann)
     # On utilise une fenêtre de Hann (proche du Tukey MATLAB par défaut)
-    win = torch.hann_window(nw, periodic=False, device=device).view(-1, 1)
+    win = torch.hann_window(nw, periodic=False, device=device, dtype=torch.float32).view(-1, 1)
 
     # 5. Calcul des FFT par snapshots
     # On va stocker les spectres complexes : [n_snapshots, n_freq_indices, Ne]
-    tf_f = torch.zeros((n_snapshots, indices.numel(), Ne), dtype=torch.complex64, device=device)
-
+    #tf_f = torch.zeros((n_snapshots, indices.numel(), Ne), dtype=torch.complex64, device=device)
+    '''
     for i, start in enumerate(starts):
         # Extraction du snapshot + application de la fenêtre
         snapshot = raw[start : start + nw, :] * win
@@ -76,7 +80,19 @@ def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
         
         # On ne garde que les bins qui nous intéressent
         # indices.flatten() contient tous les bins pour toutes les fréquences demandées
-        tf_f[i] = full_fft[indices.flatten(), :]
+        tf_f[i] = full_fft[indices.flatten(), :]'''
+    # raw shape: [Nt, Ne]
+    snapshots = raw.unfold(dimension=0, size=nw, step=lag) # [n_snapshots, Ne, nw]
+    snapshots = snapshots.permute(0, 2, 1) # [n_snapshots, nw, Ne]
+
+    # Application de la fenêtre (broadcast)
+    snapshots = snapshots * win.view(1, -1, 1)
+
+    # FFT sur tout le batch d'un coup ! 🔥
+    full_fft = torch.fft.fft(snapshots, n=n_zp, dim=1)
+
+    # Extraction des bins
+    tf_f = full_fft[:, indices.flatten(), :] # [n_snapshots, n_bins, Ne]
 
     # 6. Calcul de la CSM : Moyenne de (X * X^H)
     # X est [n_snapshots, n_bins, Ne]
