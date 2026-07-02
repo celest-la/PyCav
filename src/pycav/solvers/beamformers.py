@@ -1,26 +1,42 @@
+from __future__ import annotations
+from typing import Union, Tuple, Optional
+
 import torch
 from pycav.physics.propagation import compute_steering_vectors
 
 class BaseFrequencySolver:
-    def __init__(self, probe, grid, c=1540):
-        self.probe = probe
+    def __init__(self, probe: Probe, grid: Grid, c: float = 1540) -> None:
+        self.probe  = probe
         self.grid = grid
         self.c = c
     @torch.no_grad()
-    def get_steering_vectors(self, freqs):
+    def get_steering_vectors(self, freqs: Union[torch.Tensor, List[float], float]) -> torch.Tensor:
         """Récupère A [F, P, M]"""
         return compute_steering_vectors(self.probe, self.grid.positions, freqs, self.c)
 
+    def _format_output(self, img: torch.Tensor, average: bool) -> torch.Tensor:
+        """
+        Met en forme l'image finale pour correspondre à la taille de la grille (Nx, Nz).
+        img a la forme [F, P] où P = Nx * Nz.
+        """
+        F = img.shape[0]
+        # Reshape en [F, Nx, Nz]
+        img_reshaped = img.view(F, *self.grid.shape)
+        
+        if average:
+            return img_reshaped.mean(dim=0) # Renvoie [Nx, Nz]
+        return img_reshaped # Renvoie [F, Nx, Nz]
+
 class DAS(BaseFrequencySolver):
-    def solve(self, csm, freqs, average=True):
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], average: bool = True) -> torch.Tensor:
         a = self.get_steering_vectors(freqs)
         a= a/torch.tensor(self.probe.positions.shape[0])
         img = torch.einsum('fpi,fij,fpj->fp', a.conj(), csm, a).real
-        return img.mean(dim=0) if average else img
+        return self._format_output(img, average)
 
 class RCB(BaseFrequencySolver):
     @torch.no_grad()
-    def solve(self, csm, freqs, epsilon=0.1, average=True):
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], epsilon: float = 0.1, average: bool = True)-> torch.Tensor:
         # a : [F, P, M]
         a = self.get_steering_vectors(freqs)
         
@@ -38,11 +54,11 @@ class RCB(BaseFrequencySolver):
         den = torch.einsum('fpm,fmp->fp', a.conj(), x).real
         
         img = 1.0 / den
-        return img.mean(dim=0) if average else img
+        return self._format_output(img, average)
 
 class RCB_Li(BaseFrequencySolver):
     @torch.no_grad()
-    def solve(self, csm, freqs, epsilon=0.1, average=True):
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], epsilon: float = 0.1, average: bool = True) -> torch.Tensor:
         a_all = self.get_steering_vectors(freqs)
         F, P, M = a_all.shape
         device = csm.device
@@ -107,11 +123,11 @@ class RCB_Li(BaseFrequencySolver):
             
             final_map[f] = map_t * (norm_ac2 / M)
 
-        return final_map.mean(dim=0) if average else final_map
+        return self._format_output(final_map, average)
     
 class FB(BaseFrequencySolver):
     @torch.no_grad()
-    def solve(self, csm, freqs, r=1, method='standard', average=True):
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], r: float = 1, method: str = 'standard', average: bool = True)-> torch.Tensor:
         """
         Implémentation stricte du 'pisa' (Functional Beamforming) de ton MATLAB.
         
@@ -153,4 +169,4 @@ class FB(BaseFrequencySolver):
 
             
 
-        return img.mean(dim=0) if average else img
+        return self._format_output(img, average)

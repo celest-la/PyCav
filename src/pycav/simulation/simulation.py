@@ -1,15 +1,19 @@
+from __future__ import annotations
+from typing import Union, Tuple, Optional
+
 import torch as torch
 import numpy as np
 from pycav.physics.propagation import compute_steering_vectors
 from scipy.signal import butter, sosfiltfilt
 
+
 class getPositions:
     @classmethod
     @torch.no_grad()
-    def random_ellipse(cls,x_position_lim = 0e-3, z_position_lim = 20e-3, x_size_lim = 1e-3, z_size_lim = 1e-3, angle = 0, density=100):
+    def random_ellipse(cls,x_position_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 0e-3, z_position_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 20e-3, x_size_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 1e-3,  z_size_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 1e-3,  angle: Optional[float] = 0, density: int = 100) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Union[float, torch.Tensor]]:
 
        ### Calculation of the size of the z axis of the ellipse
-        def get_val(lim):
+        def get_val(lim: Union[float, Tuple, list, torch.Tensor]) -> torch.Tensor:
             lim=torch.as_tensor(lim)
             if lim.ndim == 0 or lim.shape[0] == 1:
                 return lim
@@ -36,7 +40,7 @@ class getPositions:
         elif x_position_lim.shape[0] == 2:
             x_center=x_position_lim[0]+x_size/2+torch.rand(1)*(x_position_lim[1]-x_position_lim[0]-2*x_size/2)            
         else:
-            raise ValueError("z_position_lim should be of size 1 or 2")    
+            raise ValueError("x_position_lim should be of size 1 or 2")    
 
         center = torch.tensor([x_center, z_center],dtype=torch.float32)
         
@@ -64,7 +68,7 @@ class getPositions:
         return  bubbles_pos, center, x_size, z_size, angle
 
 class BubbleSource:
-    def __init__(self, probe, bubble_positions, c=1540):
+    def __init__(self, probe: Probe, bubble_positions: torch.Tensor, c: float = 1540) -> None:
         self.probe = probe
         self.c = c
         self.bubble_positions = bubble_positions
@@ -75,12 +79,12 @@ class Vokurka(BubbleSource):
         pass
 
 class Stable(BubbleSource):
-    def __init__(self, fs, f_hifu, device="cpu"):
+    def __init__(self, fs: float, f_hifu: float, device: Union[str, torch.device] = "cpu") -> None:
         self.fs = fs
         self.f_hifu = f_hifu
         self.device = device
     @torch.no_grad()
-    def get_kernel(self, alpha=1.0, beta=0.8, delta=0.1):
+    def get_kernel(self, alpha: float = 1.0, beta: float = 0.8, delta: float = 0.1) -> torch.Tensor:
         """
         alpha/beta : asymétrie expansion/compression (génère les harmoniques 2f, 3f)
         delta : différence d'amplitude entre le cycle 1 et le cycle 2 (génère f0/2)
@@ -108,7 +112,7 @@ class Stable(BubbleSource):
         return (kernel * window) / torch.norm(kernel * window)
 
 class StableSimulator:
-    def __init__(self, probe, bubble_positions, c0=1540, fhifu=1e6, device="cpu"):
+    def __init__(self, probe: Probe, bubble_positions: torch.Tensor, c0: float = 1540, fhifu: float = 1e6, device: Union[str, torch.device] = "cpu") -> None:
         self.probe = probe
         self.bubble_positions = bubble_positions  # (Nb, 3) ou (Nb, 2)
         self.c0 = c0
@@ -116,13 +120,13 @@ class StableSimulator:
         self.nb = bubble_positions.shape[0]
         self.device = device
     @torch.no_grad()
-    def _compute_batch_delays(self, batch_pos, t0):
+    def _compute_batch_delays(self, batch_pos: torch.Tensor, t0: float = 0) -> torch.Tensor:
         """Calcule les index de délais pour un groupe de bulles."""
         # dist: (Nelem, Batch_Nb)
         dist = torch.cdist(self.probe.positions, batch_pos, p=2)
         return (dist / self.c0) * self.probe.fs + t0
     @torch.no_grad()
-    def _get_source_events(self, n_cycles, batch_nb, A0, sd, subharmonic=True):
+    def _get_source_events(self, n_cycles: int, batch_nb: int, A0: float, sd: float, subharmonic: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
         # Si subharmonic, on veut une impulsion tous les 2 cycles HIFU
         step = 2 if subharmonic else 1
         
@@ -137,7 +141,7 @@ class StableSimulator:
         
         return t_emit, amps
     @torch.no_grad()
-    def _splat_linear(self, rf_grid, t_arrival, amplitudes):
+    def _splat_linear(self, rf_grid: torch.Tensor, t_arrival: torch.Tensor, amplitudes: torch.Tensor) -> None:
         """Projette les impacts sur la grille RF (Samples x Nelem)."""
         n_samples, nelem = rf_grid.shape
         
@@ -163,7 +167,7 @@ class StableSimulator:
                 accumulate=True
             )
     @torch.no_grad()
-    def get_delayed_dirac(self, n_cycles, A0=1, t0=0, t_acq=100e-6, sd=0.1, batch_size=1000):
+    def get_delayed_dirac(self, n_cycles: int, A0: float = 1, t0: float = 0, t_acq: float = 100e-6, sd: float = 0.1, batch_size: int = 1000)-> torch.Tensor:
         """Fonction principale avec gestion du batching."""
         nelem = self.probe.positions.shape[0]
         n_samples = int(t_acq * self.probe.fs)
@@ -193,7 +197,7 @@ class StableSimulator:
         return dirac_RF
 
     @torch.no_grad()
-    def apply_kernel(self, dirac_rf, kernel):
+    def apply_kernel(self, dirac_rf: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
         """
         Applique le kernel de cavitation sur la matrice de Diracs.
         dirac_rf : Tensor (n_samples, nelem)
@@ -219,7 +223,7 @@ class StableSimulator:
         return rf_conv.squeeze(0).t()
 
     
-    def apply_probe_filter(self, rf_tensor):
+    def apply_probe_filter(self, rf_tensor: torch.Tensor) -> torch.Tensor:
         """Filtrage passe-bande 100% GPU (Zero-phase)"""
         n = rf_tensor.shape[0]
         fft_rf = torch.fft.rfft(rf_tensor, dim=0)
@@ -232,9 +236,9 @@ class StableSimulator:
         return torch.fft.irfft(fft_rf, n=n, dim=0)
 
     @torch.no_grad()
-    def simulate(self, n_cycles=200, t_acq=100e-6, A0=1, sd=0.1, 
-                 alpha=1.0, beta=0.5, delta=0.2, 
-                 noise_level=0.001, apply_filter=True, batch_size=1000):
+    def simulate(self, n_cycles: int = 200, t_acq: float = 100e-6, A0: float = 1, sd: float = 0.1, 
+                 alpha: float = 1.0, beta: float = 0.5, delta: float = 0.2, 
+                 noise_level: float = 0.001, apply_filter: bool = True, batch_size: int = 1000) -> torch.Tensor:
         """
         Méthode tout-en-un pour l'utilisateur.
         Gère la création des Diracs, du Kernel de signature de bulle, le bruit et le filtrage.
@@ -259,15 +263,16 @@ class StableSimulator:
 
         
 class BBagSimulator():
-        def __init__(self, probe, bubble_positions, c0=1540, fhifu=1e6, device="cpu"):
+        def __init__(self, probe: Probe, bubble_positions: torch.Tensor, c0: float = 1540, fhifu: float = 1e6, device: Union[str, torch.device] = "cpu")-> None:
             self.probe = probe
             self.bubble_positions = bubble_positions  # (Nb, 3) ou (Nb, 2)
             self.c0 = c0
             self.fhifu = fhifu
             self.nb = bubble_positions.shape[0]
             self.device = device
+        
         @torch.no_grad()
-        def get_RF(self, n_cycles=200, A0=1, t0=0, t_acq=100e-6, batch_size=1000):
+        def get_RF(self, n_cycles: int = 200, A0: float = 1, t0: float = 0, t_acq: float = 100e-6, batch_size: int = 1000) -> torch.Tensor:
             source_signals=A0 * torch.rand((int(n_cycles*self.probe.fs/self.fhifu), self.nb),device=self.device)
             n_bin = n_bin = int(t_acq * self.probe.fs)
             source_fft = torch.fft.rfft(source_signals, dim=0, n=n_bin)
@@ -276,7 +281,7 @@ class BBagSimulator():
             delayed_fft = torch.einsum('fb,fbe->fe', source_fft, steer_vec)
             return torch.fft.irfft(delayed_fft, n = n_bin, dim = 0)
 
-        def apply_probe_filter(self, rf_tensor):
+        def apply_probe_filter(self, rf_tensor: torch.Tensor) -> torch.Tensor:
             n = rf_tensor.shape[0]
             # 1. Passage dans le domaine fréquentiel
             fft_rf = torch.fft.rfft(rf_tensor, dim=0)
@@ -292,7 +297,10 @@ class BBagSimulator():
             return torch.fft.irfft(fft_rf, n=n, dim=0)
 
         @torch.no_grad()
-        def simulate(self, t_acq=100e-6, n_cycles=200, A0=1, batch_size=1000, noise_level=0.001, apply_filter=True):
+        def simulate(self, t_acq: float = 100e-6, 
+        n_cycles: int = 200, A0: float = 1, 
+        batch_size: int = 1000, noise_level: float = 0.001, 
+        apply_filter: bool = True) -> torch.Tensor:
             """
             Méthode tout-en-un pour l'utilisateur.
             """

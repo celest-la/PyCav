@@ -1,8 +1,12 @@
+from __future__ import annotations
+from typing import Union, Tuple, Optional
+
 import torch
 import numpy as np
 
+
 @torch.no_grad()
-def compute_csm(raw, probe, K, overlap, f, n_bin=1, n_zp=0):
+def compute_csm(raw: torch.Tensor, probe: Probe, K: int, overlap: float, f: Union[torch.Tensor, List[float], float], n_bin: int = 1, n_zp: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Calcule la Cross-Spectral Matrix (CSM) par la méthode des snapshots.
     

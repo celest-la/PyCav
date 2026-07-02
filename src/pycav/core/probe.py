@@ -1,23 +1,27 @@
 # src/py_cav/core/probe.py
+from __future__ import annotations
+from typing import Union, Tuple, Optional, Any
+
 import torch
 import numpy as np
 import scipy.io as sio
 from pycav.utils import validation_probe
 
+
 class Probe:
     @validation_probe
-    def __init__(self, positions, fs, fc,device="cpu"):
+    def __init__(self, positions: Union[torch.Tensor, list, np.ndarray], fs: float, fc: torch.Tensor, device: Union[str, torch.device]="cpu") -> None:
         self.device = torch.device(device)
         self.positions = torch.as_tensor(positions, dtype=torch.float32, device=self.device)
         self.fs: float = float(fs)
-        self.fc: torch.tensor = fc
+        self.fc: torch.Tensor = fc
 
     @property
     def n_elements(self):
         return self.positions.shape[0]
     
     @classmethod
-    def from_matlab(cls, filepath, device="cpu"):
+    def from_matlab(cls, filepath: Union[str, Path], device: Union[str, torch.device] ="cpu") -> "Probe":
         # 1. Chargement du fichier .mat
         data = sio.loadmat(filepath)
         
@@ -34,7 +38,7 @@ class Probe:
    # Dans src/pycav/core/probe.py
 
     @classmethod
-    def from_verasonics(cls, trans_struct, resource_struct, device="cpu"):
+    def from_verasonics(cls, trans_struct: dict[str, Any], resource_struct: dict[str, Any], device: Union[str, torch.device] ="cpu") -> "Probe":
         """
         trans_struct : objet Trans de MATLAB
         resource_struct : objet Resource de MATLAB (pour fs)
@@ -54,7 +58,7 @@ class Probe:
     
     
     @classmethod
-    def from_linear(cls, n_el: int = 128, pitch: float = 0.3, fs: float = 22e6, device="cpu",fc: torch.tensor = None):
+    def from_linear(cls, n_el: int = 128, pitch: float = 0.3, fs: float = 22e6, device: Union[str, torch.device] ="cpu",fc: Optional[torch.Tensor] = None) -> "Probe":
         """
         Crée une sonde linéaire centrée sur x=0.
         n_el  : Nombre d'éléments (ex: 128)

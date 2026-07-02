@@ -1,19 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "PyCav"
 version = "0.1.0"
-description = "PyCav is a project aiming to group tools for Passive cavitation imaging, spanning from simulations of RF signals to reconstruction with diverse methods. It also integrates diverse metrics that are current for evaluating passive cavitation imaging methods."
+description = "PyCav is a project aiming to group tools for Passive cavitation imaging, spanning from simulations of RF signals to reconstruction with diverse methods."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "deepinv>=0.3.7",
-    "pandas",
+    "torch>=2.0.0",
+    "numpy",
     "scipy",
+    "matplotlib"
 ]
-[[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
-explicit = true
 
-[tool.uv.sources]
-torch = { index = "pytorch-cu121" }
-torchvision = { index = "pytorch-cu121" }uv pip install -e .
+[project.optional-dependencies]
+# Permet d'installer les outils de test avec: uv pip install -e ".[dev]"
+dev = [
+    "pytest"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

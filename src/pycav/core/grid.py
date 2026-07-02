@@ -1,7 +1,9 @@
-import torch
+from __future__ import annotations
+from typing import Union, Tuple, Optional
 
+import torch
 class Grid:
-    def __init__(self, x_coords, z_coords, device="cpu"):
+    def __init__(self, x_coords: Union[torch.Tensor, list, float], z_coords: Union[torch.Tensor, list, float], device="cpu") -> None:
         """
         x_coords: Tenseur 1D des positions en X (ex: linspace)
         z_coords: Tenseur 1D des positions en Z (ex: linspace)
@@ -24,7 +26,7 @@ class Grid:
         self.shape = (len(self.x), len(self.z))
 
     @classmethod
-    def from_limits(cls, x_lim, z_lim, step, device="cpu"):
+    def from_limits(cls, x_lim: Tuple[float, float], z_lim: Tuple[float, float], step: float, device="cpu") -> "Grid":
         """
         Crée une grille uniforme à partir de bornes.
         x_lim: (min, max) en mètres
@@ -36,7 +38,7 @@ class Grid:
         return cls(x_coords, z_coords, device=device)
 
     @classmethod
-    def from_verasonics(cls, p_struct, device="cpu"):
+    def from_verasonics(cls, p_struct: dict[str, Any], device: Union[str, torch.device] ="cpu") ->"Grid":
         """
         Exemple : crée une grille à partir de la structure P de Verasonics.
         P.startDepth et P.endDepth sont souvent en longueurs d'onde.

@@ -86,16 +86,20 @@ def plot_rf_spectrum(rf_line, fs, f0=None, title="Spectre du signal RF"):
     #plt.show()
 
 def plot_result(img, grid, title):
-    # On reshape l'image pour l'affichage (Grid stocke le shape)
-    img_2d = img.reshape(grid.shape).cpu().numpy()
+    # Sécurité : si l'image a encore la dimension des fréquences [F, Nx, Nz], on fait la moyenne
+    if img.ndim == 3:
+        img = img.mean(dim=0)
+    # Rétro-compatibilité : si l'utilisateur donne un vieux vecteur 1D
+    elif img.ndim == 1:
+        img = img.view(*grid.shape)
+
+    img_2d = img.detach().cpu().numpy()
     
-    plt.imshow(img_2d.T, extent=[grid.x.min(), grid.x.max(), grid.z.min(), grid.z.max()], cmap='hot', origin="upper")
+    plt.imshow(img_2d.T, extent=[grid.x.min()*1e3, grid.x.max()*1e3, grid.z.max()*1e3, grid.z.min()*1e3], cmap='hot', origin="upper")
     plt.colorbar(label='Intensité')
-    #plt.scatter(source_pos[0].cpu()*1e3, source_pos[2].cpu()*1e3, marker='x', color='cyan', label='Vraie Source')
     plt.title(title)
     plt.xlabel("X (mm)")
     plt.ylabel("Z (mm)")
-    plt.legend()
 
 
 
@@ -365,24 +369,25 @@ def plot_result_dB(img, grid, title, dynamic_range=20):
 
     parula_map = LinearSegmentedColormap.from_list('parula', cm_data)
 
+    # Sécurité : si l'image a la dimension des fréquences [F, Nx, Nz], on fait la moyenne
+    if img.ndim == 3:
+        img = img.mean(dim=0)
+    elif img.ndim == 1:
+        img = img.view(*grid.shape)
+
     # 1. Extraction propre du tenseur vers NumPy
     img_np = img.detach().cpu().numpy()
-    img_rescale= (img_np-np.min(img_np))/(np.max(img_np) - np.min(img_np))
+    
+    # 2. Rescale et conversion dB
+    img_rescale = (img_np - np.min(img_np)) / (np.max(img_np) - np.min(img_np))
     img_safe = np.clip(img_rescale, 1e-12, None) # Évite log(0)
-    # 2. Conversion en dB (puissance) et normalisation
-    #img_safe = np.clip(img_np, 1e-12, None)
-    img_db_norm = 10 * np.log10(img_safe/np.max(img_safe))
-    #img_db_norm = img_db - np.max(img_db)
+    img_db_norm = 10 * np.log10(img_safe / np.max(img_safe))
     
-    # 3. Reshape pour l'affichage spatial
-    img_2d = img_db_norm.reshape(grid.shape)
-    
-    # 4. Affichage
-    plt.imshow(img_2d.T, extent=[grid.x.min()*1e3, grid.x.max()*1e3, grid.z.max()*1e3, grid.z.min()*1e3], cmap=parula_map, 
+    # 3. Affichage direct (img_db_norm est déjà 2D de taille [Nx, Nz])
+    plt.imshow(img_db_norm.T, extent=[grid.x.min()*1e3, grid.x.max()*1e3, grid.z.max()*1e3, grid.z.min()*1e3], cmap=parula_map, 
                vmin=-dynamic_range, vmax=0, origin="upper")
                
     plt.colorbar(label='Intensité (dB)')
-    
     plt.title(title)
     plt.xlabel("X (mm)")
     plt.ylabel("Z (mm)")
