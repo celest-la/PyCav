@@ -1,4 +1,4 @@
-# PyCav: High-Performance Passive Cavitation Imaging in PyTorch
+# PyCav: Passive Cavitation Imaging in PyTorch
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![PyTorch](https://img.shields.io/badge/PyTorch-GPU_Accelerated-ee4c2c.svg)
