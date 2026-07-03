@@ -13,7 +13,7 @@
 * **Robust Beamformers**:
   * **DAS** (Delay-and-Sum)
   * **RCB** (Robust Capon Beamformer / Minimum Variance)
-  * **FB / PISA** (Functional Beamforming)
+  * **FB** (Functional Beamforming)
 * **Fast processing**: GPU friendly architecture
 
 ---
