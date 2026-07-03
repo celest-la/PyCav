@@ -13,7 +13,6 @@
 * **Robust Beamformers**:
   * **DAS** (Delay-and-Sum)
   * **RCB** (Robust Capon Beamformer / Minimum Variance)
-  * **RCB_Li** (RCB with uncertainty constraints)
   * **FB / PISA** (Functional Beamforming)
 * **Fast processing**: GPU friendly architecture
 
