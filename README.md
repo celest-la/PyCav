@@ -6,16 +6,16 @@
 
 **PyCav** is a modern, GPU-accelerated Python library dedicated to Passive Cavitation Imaging (PCI) and Passive Acoustic Mapping (PAM). By leveraging PyTorch's tensor operations and autograd engine capabilities (while strictly managing VRAM), PyCav transitions traditional, slow CPU-based acoustic mapping (e.g., MATLAB scripts) into highly parallelized, lightning-fast CUDA workflows.
 
-## ✨ Key Features
+## Key Features
 
 
-* **🫧 Cavitation Simulation**: Built-in simulators for both **Broadband (BBag)** and **Stable/Subharmonic** cavitation signatures.
-* **🧠 Robust Beamformers**:
+* **Cavitation Simulation**: Built-in simulators for both **Broadband (BBag)** and **Stable/Subharmonic** cavitation signatures.
+* **Robust Beamformers**:
   * **DAS** (Delay-and-Sum)
   * **RCB** (Robust Capon Beamformer / Minimum Variance)
-  * **RCB_Li** (Advanced RCB with uncertainty constraints)
+  * **RCB_Li** (RCB with uncertainty constraints)
   * **FB / PISA** (Functional Beamforming)
-* **🧮 Fast processing**: GPU friendly architecture
+* **Fast processing**: GPU friendly architecture
 
 ---
 
@@ -85,17 +85,6 @@ plt.show()
   * `beamformers`: State-of-the-art PCI solvers (`DAS`, `RCB`, `FB`, etc.).
 * `pycav.utils`: Plotting tools, colormaps (dB mapping), and decorators.
 
----
-
-## 🧪 Running Tests
-
-PyCav comes with a rigorous test suite validating tensor dimensionalities, `float32`/`complex64` data integrity, and mathematical stability.
-
-To run the tests:
-```bash
-pip install pytest
-pytest
-```
 
 ## 📄 License
 
