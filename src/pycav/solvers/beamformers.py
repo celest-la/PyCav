@@ -34,7 +34,7 @@ class DAS(BaseFrequencySolver):
         img = torch.einsum('fpi,fij,fpj->fp', a.conj(), csm, a).real
         return self._format_output(img, average)
 
-class RCB(BaseFrequencySolver):
+'''class RCB(BaseFrequencySolver):
     @torch.no_grad()
     def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], epsilon: float = 0.1, average: bool = True)-> torch.Tensor:
         # a : [F, P, M]
@@ -54,9 +54,9 @@ class RCB(BaseFrequencySolver):
         den = torch.einsum('fpm,fmp->fp', a.conj(), x).real
         
         img = 1.0 / den
-        return self._format_output(img, average)
+        return self._format_output(img, average)'''
 
-class RCB_Li(BaseFrequencySolver):
+class RCB(BaseFrequencySolver):
     @torch.no_grad()
     def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], epsilon: float = 0.1, average: bool = True) -> torch.Tensor:
         a_all = self.get_steering_vectors(freqs)
@@ -67,13 +67,10 @@ class RCB_Li(BaseFrequencySolver):
         # eigh garantit que L_val est STRICTEMENT RÉEL (float32)
         L_val, U = torch.linalg.eigh(csm)
         
-        # SECURITÉ IMPORTANTE : on clamp les valeurs propres à 1e-12 
-        # pour éviter les valeurs propres négatives dues aux imprécisions flottantes
         L_val = torch.clamp(L_val, min=1e-12)
         
         final_map = torch.zeros((F, P), device=device, dtype=torch.float32)
 
-        # L'epsilon (tolérance) est une valeur purement RÉELLE
         eps_t = torch.tensor(epsilon, device=device, dtype=torch.float32)
         sqrt_eps = torch.sqrt(eps_t)
 
@@ -95,8 +92,6 @@ class RCB_Li(BaseFrequencySolver):
             # lb est calculé comme un scalaire
             lb = (norm_a - sqrt_eps) / (L.max() * sqrt_eps)
             
-            # On initialise lamb comme un VECTEUR de taille P (un par pixel)
-            # max() gère le scalaire python, on remplit le tenseur
             lamb_init = 0.5 * max(lb.item(), 1e-10)
             lamb = torch.full((P,), lamb_init, device=device, dtype=torch.float32)
 
@@ -109,7 +104,7 @@ class RCB_Li(BaseFrequencySolver):
                 fp_val = -2 * torch.sum((L * abs_sumU2) / (denom**3), dim=1) # [P]
                 
                 lamb = lamb - f_val / fp_val
-                lamb = lamb.clamp(min=1e-10) # Fonctionne parfaitement car lamb est réel
+                lamb = lamb.clamp(min=1e-10)
 
             # 4. Calcul Puissance
             term_pow = (lamb.unsqueeze(1) / (1 + lamb.unsqueeze(1) * L))**2
@@ -139,8 +134,7 @@ class FB(BaseFrequencySolver):
         """
         # 1. Récupération des Steering Vectors [F, P, M]
         a = self.get_steering_vectors(freqs)
-        #a = a / torch.linalg.vector_norm(a, dim=-1, keepdim=True)
-        #a=a/torch.tensor(self.probe.positions.shape[0])
+
         norm = torch.linalg.vector_norm(a, dim=-1, keepdim=True)
         a = a / norm
         L, V = torch.linalg.eigh(csm)

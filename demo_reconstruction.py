@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pycav.core.probe import Probe
 from pycav.core.grid import Grid
-from pycav.solvers.beamformers import DAS, RCB, FB,RCB_Li
+from pycav.solvers.beamformers import DAS, RCB, FB
 from pycav.simulation.simulation import StableSimulator, BBagSimulator, getPositions, Stable
 from pycav.utils.io import plot_rf_matrix, plot_rf_spectrum, plot_result_dB, plot_result
 from pycav.solvers.preproc import compute_csm
@@ -47,7 +47,7 @@ csm, axf = compute_csm(rf_filtered, probe, K=130, overlap=0.9, f=[4.5e6, 5.5e6])
 # 3. RECONSTRUCTION
 # Initialisation des solvers
 das = DAS(probe, grid, c=c0)
-rcb = RCB_Li(probe, grid, c=c0)
+rcb = RCB(probe, grid, c=c0)
 fb = FB(probe, grid, c=c0)
 # Exécution
 freqs = axf # On prend la première fréquence pour la reconstruction
