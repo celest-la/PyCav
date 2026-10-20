@@ -24,12 +24,14 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 
+[tool.setuptools.package-data]
+"pycav" = ["utils/*.mat"]
 
 # Force CPU, comment for GPU usage
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+#[tool.uv.sources]
+#torch = { index = "pytorch-cpu" }
 
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
+#[[tool.uv.index]]
+#name = "pytorch-cpu"
+#url = "https://download.pytorch.org/whl/cpu"
+#explicit = true
