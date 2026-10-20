@@ -1,0 +1,1820 @@
+=================================================================
+PROJECT ARCHITECTURE: PyCav
+=================================================================
+
+PyCav/
+├── notebooks
+├── src
+│   ├── pycav
+│   │   ├── core
+│   │   │   ├── __init__.py
+│   │   │   ├── grid.py
+│   │   │   └── probe.py
+│   │   ├── io
+│   │   │   └── __init__.py
+│   │   ├── optim
+│   │   │   ├── functionals
+│   │   │   │   └── Block_functional
+│   │   │   ├── operators
+│   │   │   │   ├── CmfOperator
+│   │   │   │   ├── L2DataFidelity
+│   │   │   │   └── WeightedGradient2D
+│   │   │   ├── priors
+│   │   │   │   ├── AnisotropicTV
+│   │   │   │   ├── IsotropicTV
+│   │   │   │   └── L1prior
+│   │   │   └── solvers
+│   │   │       └── PDHG
+│   │   ├── physics
+│   │   │   ├── __init__.py
+│   │   │   └── propagation.py
+│   │   ├── simulation
+│   │   │   └── simulation.py
+│   │   ├── solvers
+│   │   │   ├── __init__.py
+│   │   │   ├── beamformers.py
+│   │   │   └── preproc.py
+│   │   ├── utils
+│   │   │   ├── __init__.py
+│   │   │   ├── decorators.py
+│   │   │   └── io.py
+│   │   └── __init__.py
+│   └── PyCav.egg-info
+│       ├── dependency_links.txt
+│       ├── PKG-INFO
+│       ├── requires.txt
+│       ├── SOURCES.txt
+│       └── top_level.txt
+├── tests
+│   ├── __init__.py
+│   └── test_pipeline.py
+├── .gitignore
+├── .python-version
+├── demo_reconstruction.py
+├── export_files.py
+├── LICENSE
+├── pyproject.toml
+├── README.md
+└── uv.lock
+
+
+=================================================================
+FILE CONTENTS
+=================================================================
+
+--- START FILE: demo_reconstruction.py ---
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from pycav.core.probe import Probe
+from pycav.core.grid import Grid
+from pycav.solvers.beamformers import DAS, RCB, FB
+from pycav.simulation.simulation import StableSimulator, BBagSimulator, getPositions, Stable
+from pycav.utils.io import plot_rf_matrix, plot_rf_spectrum, plot_result_dB, plot_result
+from pycav.solvers.preproc import compute_csm
+
+torch.set_default_dtype(torch.float32) # <- Force PyTorch à utiliser le simple précision par défaut
+# 1. SETUP GÉOMÉTRIQUE
+#device = "cuda" if torch.cuda.is_available() else "cpu"
+
+if torch.cuda.is_available():
+    device = "cuda"  # Nvidia GPU
+elif torch.backends.mps.is_available():
+    device = "mps"   # Apple Silicon GPU
+else:
+    device = "cpu"   # Fallback standard
+
+# Création d'une sonde linéaire (128 élem, pitch 0.3mm)
+probe = Probe.from_linear(n_el=128, pitch=0.3e-3, device=device)
+
+# Création d'une grille de recherche (2cm x 2cm à partir de 1cm de profondeur)
+grid = Grid.from_limits(x_lim=(-0.01, 0.01), z_lim=(0.06, 0.08), step=0.0002, device=device)
+
+# Source ponctuelle à x=2mm, z=20mm
+
+positions, center, x_size, z_size, angle = getPositions.random_ellipse(x_position_lim=(-0.002, 0.002), z_position_lim=0.07, x_size_lim=2e-3, z_size_lim=2e-3, angle=0, density=100)
+
+fhifu=1e6
+c0=1480
+
+sim_bbag = BBagSimulator(probe, positions, fhifu=fhifu, device=device, c0=c0)
+
+rf_filtered = sim_bbag.simulate(t_acq=5e-4, n_cycles=200, noise_level=0.001)
+
+
+'''sim_stable = StableSimulator(probe, positions, fhifu=fhifu, device=device, c0=c0)
+
+rf_filtered = sim_stable.simulate(t_acq=1e-3, n_cycles=500, noise_level=0.001)'''
+
+
+csm, axf = compute_csm(rf_filtered, probe, K=130, overlap=0.9, f=[4.5e6, 5.5e6])
+
+# 3. RECONSTRUCTION
+# Initialisation des solvers
+das = DAS(probe, grid, c=c0)
+rcb = RCB(probe, grid, c=c0)
+fb = FB(probe, grid, c=c0)
+# Exécution
+freqs = axf # On prend la première fréquence pour la reconstruction
+# %%
+img_das = das.solve(csm, freqs, average=False)
+img_rcb = rcb.solve(csm, freqs, epsilon=5)
+img_fb = fb.solve(csm, freqs, r=0) 
+print(img_das.shape)
+
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 3, 1) 
+plot_result_dB(img_das[1,:,:], grid, "DAS - Point Source", dynamic_range=20)
+plt.subplot(1, 3, 2); plot_result_dB(img_rcb, grid, "RCB - Point Source", dynamic_range=20)
+plt.subplot(1, 3, 3); plot_result_dB(img_fb, grid, "FB - Point Source", dynamic_range=20)
+plt.tight_layout()
+plt.show()
+
+--- END FILE: demo_reconstruction.py ---
+
+--- START FILE: export_files.py ---
+import os
+from pathlib import Path
+
+# File extension types to include as readable code/text
+ALLOWED_EXTENSIONS = {
+    ".py", ".pyw", ".txt", ".md", ".json", ".yaml", 
+    ".yml", ".toml", ".ini", ".cfg", ".env.example", ".sh", ".sql"
+}
+
+# Directories and files to automatically exclude
+EXCLUDED_DIRS = {
+    ".git", "__pycache__", ".venv", "venv", "env", 
+    ".idea", ".vscode", "build", "dist", "node_modules", ".pytest_cache"
+}
+
+EXCLUDED_FILES = {
+    "export_project.py",  # Exclude this script itself
+    "project_context.txt", # Exclude the output file if placed in root
+    ".DS_Store", "poetry.lock", "Pipfile.lock"
+}
+
+def is_excluded(path: Path, root_dir: Path) -> bool:
+    """Check if a file or folder should be skipped."""
+    rel_parts = path.relative_to(root_dir).parts
+    if any(part in EXCLUDED_DIRS for part in rel_parts):
+        return True
+    if path.name in EXCLUDED_FILES:
+        return True
+    return False
+
+def generate_tree(dir_path: Path, prefix: str = "") -> str:
+    """Generates an ASCII representation of the file directory structure."""
+    tree_str = ""
+    contents = sorted(
+        [p for p in dir_path.iterdir() if not is_excluded(p, dir_path.parent)],
+        key=lambda x: (not x.is_dir(), x.name.lower())
+    )
+
+    for index, path in enumerate(contents):
+        is_last = (index == len(contents) - 1)
+        connector = "└── " if is_last else "├── "
+        
+        tree_str += f"{prefix}{connector}{path.name}\n"
+
+        if path.is_dir():
+            extension_prefix = "    " if is_last else "│   "
+            tree_str += generate_tree(path, prefix + extension_prefix)
+
+    return tree_str
+
+def export_codebase(project_root: str, output_file: str):
+    """Parses project tree and outputs file contents into a single text file."""
+    root = Path(project_root).resolve()
+    out_path = Path(output_file).resolve()
+
+    with open(out_path, "w", encoding="utf-8") as out:
+        # 1. Output Header & Architecture Tree
+        out.write("=================================================================\n")
+        out.write(f"PROJECT ARCHITECTURE: {root.name}\n")
+        out.write("=================================================================\n\n")
+        out.write(f"{root.name}/\n")
+        out.write(generate_tree(root))
+        out.write("\n\n")
+
+        # 2. Output File Contents
+        out.write("=================================================================\n")
+        out.write("FILE CONTENTS\n")
+        out.write("=================================================================\n\n")
+
+        for path in sorted(root.rglob("*")):
+            if path.is_file() and not is_excluded(path, root):
+                if path.suffix in ALLOWED_EXTENSIONS or path.name in {"Dockerfile", "Makefile"}:
+                    try:
+                        relative_path = path.relative_to(root)
+                        out.write(f"--- START FILE: {relative_path} ---\n")
+                        with open(path, "r", encoding="utf-8", errors="replace") as f:
+                            out.write(f.read())
+                        out.write(f"\n--- END FILE: {relative_path} ---\n\n")
+                    except Exception as e:
+                        print(f"Skipping {path} due to error: {e}")
+
+    print(f"Project successfully exported to: {out_path}")
+
+if __name__ == "__main__":
+    # Uses current working directory by default
+    current_dir = os.getcwd()
+    output_filename = "project_context.txt"
+    
+    export_codebase(current_dir, output_filename)
+--- END FILE: export_files.py ---
+
+--- START FILE: pyproject.toml ---
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "PyCav"
+version = "0.1.0"
+description = "PyCav is a project aiming to group tools for Passive cavitation imaging, spanning from simulations of RF signals to reconstruction with diverse methods."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0.0",
+    "numpy",
+    "scipy",
+    "matplotlib"
+]
+
+[project.optional-dependencies]
+# Permet d'installer les outils de test avec: uv pip install -e ".[dev]"
+dev = [
+    "pytest"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+--- END FILE: pyproject.toml ---
+
+--- START FILE: README.md ---
+# PyCav: High-Performance Passive Cavitation Imaging in PyTorch
+
+![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
+![PyTorch](https://img.shields.io/badge/PyTorch-GPU_Accelerated-ee4c2c.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+
+**PyCav** is a modern, GPU-accelerated Python library dedicated to Passive Cavitation Imaging (PCI) and Passive Acoustic Mapping (PAM). By leveraging PyTorch's tensor operations and autograd engine capabilities (while strictly managing VRAM), PyCav transitions traditional, slow CPU-based acoustic mapping (e.g., MATLAB scripts) into highly parallelized, lightning-fast CUDA workflows.
+
+## Key Features
+
+
+* **Cavitation Simulation**: Built-in simulators for both **Broadband (BBag)** and **Stable/Subharmonic** cavitation signatures.
+* **Robust Beamformers**:
+  * **DAS** (Delay-and-Sum)
+  * **RCB** (Robust Capon Beamformer / Minimum Variance)
+  * **FB / PISA** (Functional Beamforming)
+* **Fast processing**: GPU friendly architecture
+
+---
+
+## 📦 Installation
+
+It is recommended to use a virtual environment (`venv`, `conda`, or `uv`).
+
+```bash
+git clone https://github.com/celest-la/PyCav.git
+cd PyCav
+pip install -e .
+```
+*(Dependencies will be installed automatically).*
+
+---
+
+##  Quickstart
+
+Here is a complete, end-to-end example: from defining the geometry and simulating a stable cavitation bubble, to reconstructing the acoustic map using the Robust Capon Beamformer (RCB).
+
+```python
+import torch
+import matplotlib.pyplot as plt
+from pycav.core.probe import Probe
+from pycav.core.grid import Grid
+from pycav.simulation.simulation import StableSimulator
+from pycav.solvers.preproc import compute_csm
+from pycav.solvers.beamformers import RCB
+from pycav.utils.io import plot_result_dB
+
+# 1. Setup Environment & Geometry
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+probe = Probe.from_linear(n_el=128, pitch=0.3e-3, fs=22e6, device=device)
+grid = Grid.from_limits(x_lim=(-0.01, 0.01), z_lim=(0.06, 0.08), step=0.0002, device=device)
+
+# 2. Simulate a Stable Cavitation Event
+bubble_pos = torch.tensor([[0.0, 0.0, 0.07]], device=device) # Bubble at z=7cm
+sim = StableSimulator(probe, bubble_pos, fhifu=1e6, device=device)
+
+# 1-line simulation: propagation, subharmonic kernel convolution, noise, and L7-5 filtering
+rf_data = sim.simulate(t_acq=1e-3, n_cycles=500, noise_level=0.05)
+
+# 3. Pre-Processing (Compute Cross-Spectral Matrix)
+# Looking at the 4.5 MHz harmonic
+csm, freqs = compute_csm(rf_data, probe, K=100, overlap=0.9, f=[4.5e6])
+
+# 4. Reconstruction (Beamforming)
+rcb = RCB(probe, grid, c=1540.0)
+img = rcb.solve(csm, freqs, epsilon=10)
+
+# 5. Visualization
+plt.figure(figsize=(6, 5))
+plot_result_dB(img, grid, title="RCB Reconstruction", dynamic_range=20)
+plt.show()
+```
+
+---
+
+## 🏗️ Project Architecture
+
+* `pycav.core`: Foundational geometries (`Grid`, `Probe`).
+* `pycav.physics`: Acoustic wave propagation and steering vector computations.
+* `pycav.simulation`: RF signal generation (`StableSimulator`, `BBagSimulator`).
+* `pycav.solvers`: 
+  * `preproc`: Cross-Spectral Matrix (`compute_csm`).
+  * `beamformers`: State-of-the-art PCI solvers (`DAS`, `RCB`, `FB`, etc.).
+* `pycav.utils`: Plotting tools, colormaps (dB mapping), and decorators.
+
+
+## 📄 License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+***
+
+--- END FILE: README.md ---
+
+--- START FILE: src\pycav\__init__.py ---
+
+--- END FILE: src\pycav\__init__.py ---
+
+--- START FILE: src\pycav\core\__init__.py ---
+from .probe import Probe
+from .grid import Grid
+--- END FILE: src\pycav\core\__init__.py ---
+
+--- START FILE: src\pycav\core\grid.py ---
+from __future__ import annotations
+from typing import Union, Tuple, Optional
+
+import torch
+class Grid:
+    def __init__(self, x_coords: Union[torch.Tensor, list, float], z_coords: Union[torch.Tensor, list, float], device="cpu") -> None:
+        """
+        x_coords: Tenseur 1D des positions en X (ex: linspace)
+        z_coords: Tenseur 1D des positions en Z (ex: linspace)
+        """
+        self.device = torch.device(device)
+        self.x = torch.as_tensor(x_coords, dtype=torch.float32, device=self.device)
+        self.z = torch.as_tensor(z_coords, dtype=torch.float32, device=self.device)
+        
+        # Création du maillage (meshgrid)
+        # indexing='ij' : la matrice aura pour dimensions (len(x), len(z))
+        grid_x, grid_z = torch.meshgrid(self.x, self.z, indexing='ij')
+        
+        # On stocke les positions sous forme [N_pixels, 3] pour torch.cdist
+        self.n_pixels = grid_x.numel()
+        self.positions = torch.zeros((self.n_pixels, 3), device=self.device)
+        self.positions[:, 0] = grid_x.flatten()
+        self.positions[:, 2] = grid_z.flatten() # On utilise Z pour la profondeur
+        
+        # Utile pour le reshape final lors de l'affichage
+        self.shape = (len(self.x), len(self.z))
+
+    @classmethod
+    def from_limits(cls, x_lim: Tuple[float, float], z_lim: Tuple[float, float], step: float, device="cpu") -> "Grid":
+        """
+        Crée une grille uniforme à partir de bornes.
+        x_lim: (min, max) en mètres
+        z_lim: (min, max) en mètres
+        step: pas entre pixels en mètres
+        """
+        x_coords = torch.arange(x_lim[0], x_lim[1] + step, step)
+        z_coords = torch.arange(z_lim[0], z_lim[1] + step, step)
+        return cls(x_coords, z_coords, device=device)
+
+    @classmethod
+    def from_verasonics(cls, p_struct: dict[str, Any], device: Union[str, torch.device] ="cpu") ->"Grid":
+        """
+        Exemple : crée une grille à partir de la structure P de Verasonics.
+        P.startDepth et P.endDepth sont souvent en longueurs d'onde.
+        """
+        # À adapter selon tes exports, ici on simule la lecture :
+        z_start = p_struct.get('startDepth', 0.0)
+        z_end = p_struct.get('endDepth', 0.05)
+        # On peut fixer un pas par défaut ou le tirer de P
+        step = 0.0002 
+        
+        x_coords = torch.arange(-0.01, 0.01 + step, step)
+        z_coords = torch.arange(z_start, z_end + step, step)
+        return cls(x_coords, z_coords, device=device)
+    
+
+
+
+--- END FILE: src\pycav\core\grid.py ---
+
+--- START FILE: src\pycav\core\probe.py ---
+# src/py_cav/core/probe.py
+from __future__ import annotations
+from typing import Union, Tuple, Optional, Any
+
+import torch
+import numpy as np
+import scipy.io as sio
+from pycav.utils import validation_probe
+
+
+class Probe:
+    @validation_probe
+    def __init__(self, positions: Union[torch.Tensor, list, np.ndarray], fs: float, fc: torch.Tensor, device: Union[str, torch.device]="cpu") -> None:
+        self.device = torch.device(device)
+        self.positions = torch.as_tensor(positions, dtype=torch.float32, device=self.device)
+        self.fs: float = float(fs)
+        self.fc: torch.Tensor = fc
+
+    @property
+    def n_elements(self):
+        return self.positions.shape[0]
+    
+    @classmethod
+    def from_matlab(cls, filepath: Union[str, Path], device: Union[str, torch.device] ="cpu") -> "Probe":
+        # 1. Chargement du fichier .mat
+        data = sio.loadmat(filepath)
+        
+        # 2. Extraction des données (selon ta structure MATLAB)
+        # Supposons que ta structure s'appelle 'Sonde' dans MATLAB
+        mat_struct = data['Sonde'][0,0]
+        pos_raw = mat_struct['pos'] # Matrice [N x 3]
+        fs_raw = mat_struct['fs'][0,0] # Scalaire
+        
+        # 3. L'INSTANCIATION : On crée l'objet en appelant cls(...)
+        # C'est comme si on faisait Probe(pos_raw, fs_raw, device)
+        return cls(positions=pos_raw, fs=fs_raw, device=device)
+    
+   # Dans src/pycav/core/probe.py
+
+    @classmethod
+    def from_verasonics(cls, trans_struct: dict[str, Any], resource_struct: dict[str, Any], device: Union[str, torch.device] ="cpu") -> "Probe":
+        """
+        trans_struct : objet Trans de MATLAB
+        resource_struct : objet Resource de MATLAB (pour fs)
+        """
+        # 1. Récupération des positions [M, 3]
+        # Trans.ElementPos est souvent en [x, y, z, beam_x, beam_y, beam_z]
+        # On ne garde que les 3 premières colonnes (x, y, z)
+        pos_mm = torch.from_numpy(trans_struct.ElementPos[:, :3])
+        pos_m = pos_mm * 1e-3 # Si c'était en mm
+        
+        # 2. Récupération de la fréquence d'échantillonnage
+        # Resource.Parameters.fS est en MHz
+        fs_mhz = resource_struct.Parameters.fS
+        fs = fs_mhz * 1e6
+        
+        return cls(positions=pos_m, fs=fs, device=device)
+    
+    
+    @classmethod
+    def from_linear(cls, n_el: int = 128, pitch: float = 0.3, fs: float = 22e6, device: Union[str, torch.device] ="cpu",fc: Optional[torch.Tensor] = None) -> "Probe":
+        """
+        Crée une sonde linéaire centrée sur x=0.
+        n_el  : Nombre d'éléments (ex: 128)
+        pitch : Espacement entre les centres des éléments en mètres (ex: 0.3e-3)
+        fs    : Fréquence d'échantillonnage (par défaut 22MHz)
+        """
+        if fc is None:
+            fc = torch.tensor([4.5e6, 7.5e6], dtype=torch.float32) # ICI
+        # Calcul des positions en X pour que la sonde soit centrée
+        # (Ex: pour 2 éléments à pitch 0.3, on aura -0.15 et +0.15)
+        x = (torch.arange(n_el) - (n_el - 1) / 2) * pitch
+        
+        # On crée la matrice des positions [N_elements, 3] (X, Y, Z)
+        positions = torch.zeros((n_el, 3), device=device)
+        positions[:, 0] = x
+        # Y et Z restent à 0 pour une sonde linéaire dans le plan XZ
+        
+        return cls(positions=positions, fs=fs, fc=fc, device=device)
+--- END FILE: src\pycav\core\probe.py ---
+
+--- START FILE: src\pycav\io\__init__.py ---
+
+--- END FILE: src\pycav\io\__init__.py ---
+
+--- START FILE: src\pycav\physics\__init__.py ---
+
+--- END FILE: src\pycav\physics\__init__.py ---
+
+--- START FILE: src\pycav\physics\propagation.py ---
+from __future__ import annotations
+import torch
+from typing import Union, List
+from pycav.core.probe import Probe
+
+@torch.no_grad()
+def compute_steering_vectors(
+    probe: Probe, 
+    grid_positions: torch.Tensor, 
+    freqs: Union[torch.Tensor, List[Union[float, torch.Tensor]], float], 
+    c0: float = 1540.0
+) -> torch.Tensor:
+    
+    # 1. Calcul de la matrice de distance [Pixels x Eléments]
+    dist = torch.cdist(grid_positions, probe.positions, p=2)
+    
+    # 2. Calcul des délais [Pixels x Eléments]
+    tau = dist / c0
+    
+    # 3. SÉCURITÉ : Nettoyage de `freqs`
+    # Si l'utilisateur passe une liste (ex: [axf]), on extrait les valeurs en float purs
+    if isinstance(freqs, list):
+        freqs_clean = [f.item() if torch.is_tensor(f) else float(f) for f in freqs]
+        f = torch.tensor(freqs_clean, dtype=torch.float32, device=dist.device)
+    else:
+        f = torch.as_tensor(freqs, dtype=torch.float32, device=dist.device)
+
+    # 4. Passage au domaine fréquentiel [Fréquences x Pixels x Eléments]
+    f = f.view(-1, 1, 1)
+    
+    # steer_vec = exp(-2j * pi * f * tau)
+    # Déjà en complex64 car f et tau sont en float32 !
+    A = torch.exp(-2j * torch.pi * f * tau.unsqueeze(0))
+    
+    return A
+
+@torch.no_grad()
+def compute_delay(
+    probe: Probe, 
+    grid_positions: torch.Tensor, 
+    c0: float = 1540.0
+) -> torch.Tensor:
+    
+    dist = torch.cdist(grid_positions, probe.positions, p=2)
+    return dist / c0 * probe.fs
+--- END FILE: src\pycav\physics\propagation.py ---
+
+--- START FILE: src\pycav\simulation\simulation.py ---
+from __future__ import annotations
+from typing import Union, Tuple, Optional
+
+import torch as torch
+import numpy as np
+from pycav.physics.propagation import compute_steering_vectors
+from scipy.signal import butter, sosfiltfilt
+
+
+class getPositions:
+    @classmethod
+    @torch.no_grad()
+    def random_ellipse(cls,x_position_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 0e-3, z_position_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 20e-3, x_size_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 1e-3,  z_size_lim: Union[float, Tuple[float, float], list, torch.Tensor] = 1e-3,  angle: Optional[float] = 0, density: int = 100) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Union[float, torch.Tensor]]:
+
+       ### Calculation of the size of the z axis of the ellipse
+        def get_val(lim: Union[float, Tuple, list, torch.Tensor]) -> torch.Tensor:
+            lim=torch.as_tensor(lim)
+            if lim.ndim == 0 or lim.shape[0] == 1:
+                return lim
+            return lim[0] + torch.rand(1) * (lim[1] - lim[0])
+        
+        x_size=get_val(x_size_lim)
+        z_size = get_val(z_size_lim)
+       
+        #### Calculation of the center of the ellipse (axe z) 
+        z_position_lim=torch.as_tensor(z_position_lim)
+        if z_position_lim.numel() == 1:    
+            z_center=z_position_lim           
+
+        elif z_position_lim.numel() == 2:
+            z_center=z_position_lim[0]+z_size/2+torch.rand(1)*(z_position_lim[1]-z_position_lim[0]-2*z_size/2)            
+        else:
+            raise ValueError("z_position_lim should be of size 1 or 2")
+
+        #### Calculation of the center of the ellipse (axe x) 
+        x_position_lim=torch.as_tensor(x_position_lim)
+        if x_position_lim.shape[0] == 1:    
+            x_center=x_position_lim           
+
+        elif x_position_lim.shape[0] == 2:
+            x_center=x_position_lim[0]+x_size/2+torch.rand(1)*(x_position_lim[1]-x_position_lim[0]-2*x_size/2)            
+        else:
+            raise ValueError("x_position_lim should be of size 1 or 2")    
+
+        center = torch.tensor([x_center, z_center],dtype=torch.float32)
+        
+        ellipse_axes = torch.tensor([x_size, z_size],dtype=torch.float32)
+        
+        number_bubble = int(torch.round(x_size * z_size * density * 1e6).item())
+        
+        pos_temp=-0.5 * ellipse_axes+ellipse_axes*torch.rand(number_bubble,2)
+        
+        ind_in=(pos_temp[:,0]**2/(0.5*x_size)**2+pos_temp[:,1]**2/(0.5*z_size)**2)<=1
+        pos_temp2 = pos_temp[ind_in,:]
+
+        if angle == None:
+            angle = 360 * torch.rand(1)
+        angle_rad = torch.as_tensor(angle * torch.pi/180)
+        cos_a = torch.cos(angle_rad)
+        sin_a = torch.sin(angle_rad)
+        
+        # Matrice de rotation 2D
+        R = torch.tensor([[cos_a, -sin_a], [sin_a, cos_a]], dtype=torch.float32)
+        bubbles_pos = torch.matmul(pos_temp2, R.t()) + center
+        y=torch.zeros(bubbles_pos.shape[0],1)
+        bubbles_pos = torch.cat([bubbles_pos, y], dim=1)
+        bubbles_pos = bubbles_pos[:, [0, 2, 1]]
+        return  bubbles_pos, center, x_size, z_size, angle
+
+class BubbleSource:
+    def __init__(self, probe: Probe, bubble_positions: torch.Tensor, c: float = 1540) -> None:
+        self.probe = probe
+        self.c = c
+        self.bubble_positions = bubble_positions
+
+class Vokurka(BubbleSource):
+    def get_kernel():
+        """Cette fonction fourni le kernel de Vokurka"""
+        pass
+
+class Stable(BubbleSource):
+    def __init__(self, fs: float, f_hifu: float, device: Union[str, torch.device] = "cpu") -> None:
+        self.fs = fs
+        self.f_hifu = f_hifu
+        self.device = device
+    @torch.no_grad()
+    def get_kernel(self, alpha: float = 1.0, beta: float = 0.8, delta: float = 0.1) -> torch.Tensor:
+        """
+        alpha/beta : asymétrie expansion/compression (génère les harmoniques 2f, 3f)
+        delta : différence d'amplitude entre le cycle 1 et le cycle 2 (génère f0/2)
+        """
+        T = 1 / self.f_hifu
+        # On génère exactement 2 cycles
+        t = torch.arange(0, 2 * T, 1/self.fs, device=self.device, dtype=torch.float32)
+
+        if t.shape[0] % 2 == 0:
+            t = torch.arange(0, 2 * T + 1/self.fs, 1/self.fs, device=self.device, dtype=torch.float32)
+
+
+        s = torch.sin(2 * torch.pi * self.f_hifu * t)
+        
+        # 1. Asymétrie classique (Expansion vs Compression)
+        kernel = torch.where(s > 0, s * alpha, s * beta)
+        
+        # 2. Modulation de période (Sous-harmonique)
+        # On réduit un peu l'amplitude du deuxième cycle (t > T)
+        mask_cycle2 = (t >= T)
+        kernel[mask_cycle2] *= (1 - delta)
+        
+        # Fenêtrage
+        window = torch.hann_window(len(t), periodic=False, device=self.device, dtype=torch.float32)
+        return (kernel * window) / torch.norm(kernel * window)
+
+class StableSimulator:
+    def __init__(self, probe: Probe, bubble_positions: torch.Tensor, c0: float = 1540, fhifu: float = 1e6, device: Union[str, torch.device] = "cpu") -> None:
+        self.probe = probe
+        self.bubble_positions = bubble_positions  # (Nb, 3) ou (Nb, 2)
+        self.c0 = c0
+        self.fhifu = fhifu
+        self.nb = bubble_positions.shape[0]
+        self.device = device
+    @torch.no_grad()
+    def _compute_batch_delays(self, batch_pos: torch.Tensor, t0: float = 0) -> torch.Tensor:
+        """Calcule les index de délais pour un groupe de bulles."""
+        # dist: (Nelem, Batch_Nb)
+        dist = torch.cdist(self.probe.positions, batch_pos, p=2)
+        return (dist / self.c0) * self.probe.fs + t0
+    @torch.no_grad()
+    def _get_source_events(self, n_cycles: int, batch_nb: int, A0: float, sd: float, subharmonic: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Si subharmonic, on veut une impulsion tous les 2 cycles HIFU
+        step = 2 if subharmonic else 1
+        
+        T_samples = self.probe.fs / self.fhifu
+        
+        # On crée les indices de temps : 0.5, 2.5, 4.5... au lieu de 0.5, 1.5, 2.5...
+        t_emit = (torch.arange(0, n_cycles, step, device=self.device, dtype=torch.float32).float() + 0.5) * T_samples
+        
+        # Le nombre d'amplitudes doit correspondre au nombre de Diracs générés
+        n_pulses = t_emit.shape[0]
+        amps = A0 + sd * torch.randn(n_pulses, batch_nb, device=self.device, dtype=torch.float32)
+        
+        return t_emit, amps
+    @torch.no_grad()
+    def _splat_linear(self, rf_grid: torch.Tensor, t_arrival: torch.Tensor, amplitudes: torch.Tensor) -> None:
+        """Projette les impacts sur la grille RF (Samples x Nelem)."""
+        n_samples, nelem = rf_grid.shape
+        
+        # 1. Flattening pour traitement vectorisé
+        t_flat = t_arrival.reshape(-1)
+        a_flat = amplitudes.reshape(-1)
+        
+        # indices d'éléments répétés pour chaque impact
+        # t_arrival est (nelem, n_cycles, batch_nb)
+        elem_idx = torch.arange(nelem, device=self.device).view(-1, 1, 1).expand_as(t_arrival).reshape(-1)
+
+        t_floor = torch.floor(t_flat).long()
+        frac = t_flat - t_floor.float()
+
+        # 2. Accumulation sur les deux samples adjacents
+        for offset, weight in [(0, 1 - frac), (1, frac)]:
+            idx = t_floor + offset
+            mask = (idx >= 0) & (idx < n_samples)
+            
+            rf_grid.index_put_(
+                (idx[mask], elem_idx[mask]), 
+                (a_flat * weight)[mask], 
+                accumulate=True
+            )
+    @torch.no_grad()
+    def get_delayed_dirac(self, n_cycles: int, A0: float = 1, t0: float = 0, t_acq: float = 100e-6, sd: float = 0.1, batch_size: int = 1000)-> torch.Tensor:
+        """Fonction principale avec gestion du batching."""
+        nelem = self.probe.positions.shape[0]
+        n_samples = int(t_acq * self.probe.fs)
+        dirac_RF = torch.zeros(n_samples, nelem, device=self.device)
+
+        for i in range(0, self.nb, batch_size):
+            # --- 1. Sélection du Batch ---
+            batch_pos = self.bubble_positions[i : i + batch_size]
+            curr_batch_nb = batch_pos.shape[0]
+            
+            # --- 2. Géométrie & Source ---
+            index_tau = self._compute_batch_delays(batch_pos, t0)
+            index_dirac, batch_amps = self._get_source_events(n_cycles, curr_batch_nb, A0, sd)
+            
+            # --- 3. Combinaison des temps (Broadcast) ---
+            # (nelem, batch, 1) + (1, 1, n_cycles) -> (nelem, n_cycles, batch)
+            tau_final = (index_tau.unsqueeze(-1) + index_dirac.view(1, 1, -1)).permute(0, 2, 1)
+            
+            # --- 4. Expansion des amplitudes ---
+            # On duplique les amplitudes de la bulle pour chaque élément de la sonde
+            # (n_cycles, batch) -> (nelem, n_cycles, batch)
+            full_amps = batch_amps.unsqueeze(0).expand_as(tau_final)
+            
+            # --- 5. Rendu sur la grille ---
+            self._splat_linear(dirac_RF, tau_final, full_amps)
+            
+        return dirac_RF
+
+    @torch.no_grad()
+    def apply_kernel(self, dirac_rf: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
+        """
+        Applique le kernel de cavitation sur la matrice de Diracs.
+        dirac_rf : Tensor (n_samples, nelem)
+        kernel : Tensor (kernel_length,)
+        """
+        # 1. Préparation des dimensions (Batch, Channels, Length)
+        # On transpose pour avoir les éléments en 'Channels'
+        x = dirac_rf.t().unsqueeze(0) # (1, nelem, n_samples)
+        
+        # 2. Préparation du Kernel
+        # On doit le répéter pour chaque canal (nelem)
+        # Shape finale : (nelem, 1, kernel_length)
+        nelem = dirac_rf.shape[1]
+        k_size = kernel.shape[0]
+        weight = kernel.view(1, 1, -1).repeat(nelem, 1, 1)
+        
+        # 3. Convolution
+        # 'padding=same' permet de garder la même longueur de signal
+        # 'groups=nelem' permet de convoluer chaque channel avec son propre kernel
+        rf_conv = torch.nn.functional.conv1d(x, weight, padding='same', groups=nelem)
+        
+        # 4. Retour au format original (n_samples, nelem)
+        return rf_conv.squeeze(0).t()
+
+    
+    def apply_probe_filter(self, rf_tensor: torch.Tensor) -> torch.Tensor:
+        """Filtrage passe-bande 100% GPU (Zero-phase)"""
+        n = rf_tensor.shape[0]
+        fft_rf = torch.fft.rfft(rf_tensor, dim=0)
+        freqs = torch.fft.rfftfreq(n, d=1/self.probe.fs, device=self.device)
+        
+        band = self.probe.fc
+        mask = (freqs >= band[0]) & (freqs <= band[1])
+        fft_rf[~mask, :] = 0
+        
+        return torch.fft.irfft(fft_rf, n=n, dim=0)
+
+    @torch.no_grad()
+    def simulate(self, n_cycles: int = 200, t_acq: float = 100e-6, A0: float = 1, sd: float = 0.1, 
+                 alpha: float = 1.0, beta: float = 0.5, delta: float = 0.2, 
+                 noise_level: float = 0.001, apply_filter: bool = True, batch_size: int = 1000) -> torch.Tensor:
+        """
+        Méthode tout-en-un pour l'utilisateur.
+        Gère la création des Diracs, du Kernel de signature de bulle, le bruit et le filtrage.
+        """
+        # 1. Génération de la matrice des Diracs
+        diracs = self.get_delayed_dirac(n_cycles=n_cycles, A0=A0, t_acq=t_acq, sd=sd, batch_size=batch_size)
+        
+        # 2. Génération automatique du Kernel "Stable" et Convolution
+        k_sub = Stable(self.probe.fs, self.fhifu, device=self.device).get_kernel(alpha=alpha, beta=beta, delta=delta)
+        rf = self.apply_kernel(diracs, k_sub)
+        
+        # 3. Ajout du bruit
+        if noise_level > 0:
+            noise = noise_level * torch.randn_like(rf) * rf.max()
+            rf = rf + noise
+            
+        # 4. Filtrage sonde
+        if apply_filter:
+            rf = self.apply_probe_filter(rf)
+            
+        return rf
+
+        
+class BBagSimulator():
+        def __init__(self, probe: Probe, bubble_positions: torch.Tensor, c0: float = 1540, fhifu: float = 1e6, device: Union[str, torch.device] = "cpu")-> None:
+            self.probe = probe
+            self.bubble_positions = bubble_positions  # (Nb, 3) ou (Nb, 2)
+            self.c0 = c0
+            self.fhifu = fhifu
+            self.nb = bubble_positions.shape[0]
+            self.device = device
+        
+        @torch.no_grad()
+        def get_RF(self, n_cycles: int = 200, A0: float = 1, t0: float = 0, t_acq: float = 100e-6, batch_size: int = 1000) -> torch.Tensor:
+            source_signals=A0 * torch.rand((int(n_cycles*self.probe.fs/self.fhifu), self.nb),device=self.device)
+            n_bin = n_bin = int(t_acq * self.probe.fs)
+            source_fft = torch.fft.rfft(source_signals, dim=0, n=n_bin)
+            freq=torch.fft.rfftfreq(n_bin, d=1/self.probe.fs, device=self.device)
+            steer_vec = compute_steering_vectors(probe=self.probe, grid_positions=self.bubble_positions, freqs=freq, c0=self.c0)
+            delayed_fft = torch.einsum('fb,fbe->fe', source_fft, steer_vec)
+            return torch.fft.irfft(delayed_fft, n = n_bin, dim = 0)
+
+        def apply_probe_filter(self, rf_tensor: torch.Tensor) -> torch.Tensor:
+            n = rf_tensor.shape[0]
+            # 1. Passage dans le domaine fréquentiel
+            fft_rf = torch.fft.rfft(rf_tensor, dim=0)
+            freqs = torch.fft.rfftfreq(n, d=1/self.probe.fs, device=self.device)
+            
+            # 2. Création du masque (hors de la bande = 0)
+            band = self.probe.fc
+            mask = (freqs >= band[0]) & (freqs <= band[1])
+            
+            fft_rf[~mask, :] = 0
+            
+            # 3. Retour dans le domaine temporel
+            return torch.fft.irfft(fft_rf, n=n, dim=0)
+
+        @torch.no_grad()
+        def simulate(self, t_acq: float = 100e-6, 
+        n_cycles: int = 200, A0: float = 1, 
+        batch_size: int = 1000, noise_level: float = 0.001, 
+        apply_filter: bool = True) -> torch.Tensor:
+            """
+            Méthode tout-en-un pour l'utilisateur.
+            """
+            # 1. Génération du signal parfait
+            rf = self.get_RF(n_cycles=n_cycles, A0=A0, t_acq=t_acq, batch_size=batch_size)
+            
+            # 2. Ajout du bruit d'acquisition
+            if noise_level > 0:
+                noise = noise_level * torch.randn_like(rf) * rf.max()
+                rf = rf + noise
+                
+            # 3. Filtrage par la bande passante de la sonde
+            if apply_filter:
+                rf = self.apply_probe_filter(rf)
+                
+            return rf
+--- END FILE: src\pycav\simulation\simulation.py ---
+
+--- START FILE: src\pycav\solvers\__init__.py ---
+
+--- END FILE: src\pycav\solvers\__init__.py ---
+
+--- START FILE: src\pycav\solvers\beamformers.py ---
+from __future__ import annotations
+from typing import Union, Tuple, Optional
+
+import torch
+from pycav.physics.propagation import compute_steering_vectors
+
+class BaseFrequencySolver:
+    def __init__(self, probe: Probe, grid: Grid, c: float = 1540) -> None:
+        self.probe  = probe
+        self.grid = grid
+        self.c = c
+    @torch.no_grad()
+    def get_steering_vectors(self, freqs: Union[torch.Tensor, List[float], float]) -> torch.Tensor:
+        """Récupère A [F, P, M]"""
+        return compute_steering_vectors(self.probe, self.grid.positions, freqs, self.c)
+
+    def _format_output(self, img: torch.Tensor, average: bool) -> torch.Tensor:
+        """
+        Met en forme l'image finale pour correspondre à la taille de la grille (Nx, Nz).
+        img a la forme [F, P] où P = Nx * Nz.
+        """
+        F = img.shape[0]
+        # Reshape en [F, Nx, Nz]
+        img_reshaped = img.view(F, *self.grid.shape)
+        
+        if average:
+            return img_reshaped.mean(dim=0) # Renvoie [Nx, Nz]
+        return img_reshaped # Renvoie [F, Nx, Nz]
+
+class DAS(BaseFrequencySolver):
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], average: bool = True) -> torch.Tensor:
+        a = self.get_steering_vectors(freqs)
+        a= a/torch.tensor(self.probe.positions.shape[0])
+        img = torch.einsum('fpi,fij,fpj->fp', a.conj(), csm, a).real
+        return self._format_output(img, average)
+
+class CMF(BaseFrequencySolver):
+    @torch.no_grad()
+    
+    def solve(b, S, M, N, rel_lambda_l1, rel_lambda_tv_ax, rel_lambda_tv_lat):
+     
+        device = b.device
+        
+        # Options par défaut
+        max_iter = options.get('max_iter', 100)
+        verbose = options.get('verbose', True)
+        warm_start = options.get('warm_start', True)
+        tv_type = options.get('tv_type', 'isotropic')
+        
+        # 1. Instanciation de l'opérateur physique
+        K_cmf = CmfOperator(S, M, N)
+        
+        Aty_initial = K_cmf.adjoint(b)
+        lambda_max = torch.max(torch.abs(Aty_initial)).item()
+    
+        # Initialisation de x0 (DAS ou Zéros)
+        if "x0" in options:
+            x0 = options["x0"]
+        else:
+            if warm_start:
+                x0 = torch.clamp(Aty_initial, min=0.0) # DAS positif
+            else:
+                x0 = torch.zeros(M, N, dtype=b.dtype, device=device)
+                
+        # Calcul des échelles absolues
+        lambda_l1 = rel_lambda_l1 * lambda_max
+        lambda_tv_ax = rel_lambda_tv_ax * lambda_max
+        lambda_tv_lat = rel_lambda_tv_lat * lambda_max
+        
+        if verbose:
+            print("--- WFC-CMF PyTorch-GPU (OLS) ---")
+            print(f"Grille d'imagerie    : [{M} x {N}] pixels")
+            print(f"Calcul de lambda_max : {lambda_max:.6e}")
+            print("---------------------------------")
+            
+        K_grad = WeightedGradient2D(lambda_tv_lat, lambda_tv_ax, device=device)
+        K = BlockOperator([K_cmf, K_grad])
+        
+        F_fidelity = L2DataFidelity(b)
+        if tv_type == 'anisotropic':
+            F_tv = AnisotropicTV(1.0)
+        else:
+            F_tv = IsotropicTV(1.0)
+            
+        F = BlockFunctional([F_fidelity, F_tv])
+        G = L1Prior(lambda_l1, non_negative=True)
+        
+        solver = PDHGSolver(K, F, G, device=device)
+        solver.max_iter = max_iter
+        solver.verbose = verbose
+        
+        # Réglage et exécution
+        solver.tune_steps(x0)
+        x_opt, history = solver.solve(x0)
+        
+        return x_opt, history
+
+'''class RCB(BaseFrequencySolver):
+    @torch.no_grad()
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], epsilon: float = 0.1, average: bool = True)-> torch.Tensor:
+        # a : [F, P, M]
+        a = self.get_steering_vectors(freqs)
+        
+        # Inversion de la CSM avec diagonal loading
+        identity = torch.eye(csm.shape[-1], device=csm.device, dtype=csm.dtype).unsqueeze(0)
+        reg = epsilon * torch.mean(torch.diagonal(csm, dim1=-2, dim2=-1).real, dim=-1).view(-1, 1, 1)
+        R = csm + reg * identity # R : [F, M, M]
+        
+        # Résolution du système linéaire R * x = a_transpose
+        
+        x = torch.linalg.solve(R, a.transpose(-1, -2))
+        
+        # Calcul du dénominateur : a^H * (R^-1 * a)
+       
+        den = torch.einsum('fpm,fmp->fp', a.conj(), x).real
+        
+        img = 1.0 / den
+        return self._format_output(img, average)'''
+
+class RCB(BaseFrequencySolver):
+    @torch.no_grad()
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], epsilon: float = 0.1, average: bool = True) -> torch.Tensor:
+        a_all = self.get_steering_vectors(freqs)
+        F, P, M = a_all.shape
+        device = csm.device
+        
+        # Eigendecomposition
+        # eigh garantit que L_val est STRICTEMENT RÉEL (float32)
+        L_val, U = torch.linalg.eigh(csm)
+        
+        L_val = torch.clamp(L_val, min=1e-12)
+        
+        final_map = torch.zeros((F, P), device=device, dtype=torch.float32)
+
+        eps_t = torch.tensor(epsilon, device=device, dtype=torch.float32)
+        sqrt_eps = torch.sqrt(eps_t)
+
+        for f in range(F):
+            # Données locales
+            a = a_all[f]
+            L = L_val[f].unsqueeze(0)   # [1, M] (réel)
+            U_f = U[f]                  # [M, M] (complexe)
+            
+            # 1. Projection
+            sumU = a.conj() @ U_f               # [P, M] (complexe)
+            
+            # torch.abs() convertit nativement le complexe en float32 réel !
+            abs_sumU2 = torch.abs(sumU)**2 # [P, M] (réel float32)
+            
+            # 2. Initialisation Lambda
+            norm_a = torch.sqrt(torch.tensor(float(M), device=device, dtype=torch.float32)) 
+            
+            # lb est calculé comme un scalaire
+            lb = (norm_a - sqrt_eps) / (L.max() * sqrt_eps)
+            
+            lamb_init = 0.5 * max(lb.item(), 1e-10)
+            lamb = torch.full((P,), lamb_init, device=device, dtype=torch.float32)
+
+            # 3. Newton-Raphson Loop
+            for _ in range(20):
+                # denom: [P, M] car L est [1, M] et lamb.unsqueeze(1) est [P, 1]
+                denom = 1 + L * lamb.unsqueeze(1)   
+                f_val = torch.sum(abs_sumU2 / (denom**2), dim=1) - eps_t # [P]
+                fp_val = -2 * torch.sum((L * abs_sumU2) / (denom**3), dim=1) # [P]
+                
+                lamb = lamb - f_val / fp_val
+                lamb = lamb.clamp(min=1e-10)
+
+            # 4. Calcul Puissance
+            term_pow = (lamb.unsqueeze(1) / (1 + lamb.unsqueeze(1) * L))**2
+            denom_pow = torch.sum(L * abs_sumU2 * term_pow, dim=1)
+            
+            map_t = 1.0 / torch.clamp(denom_pow, min=1e-12)
+
+            # 5. Correction d'Ambiguïté
+            weighting = 1.0 / (1 + L * lamb.unsqueeze(1))
+            norm_ac2 = torch.sum(abs_sumU2 * (1 - weighting)**2, dim=1)
+            final_map[f] = map_t * (norm_ac2 / M)
+
+        return self._format_output(final_map, average)
+    
+class FB(BaseFrequencySolver):
+    @torch.no_grad()
+    def solve(self, csm: torch.Tensor, freqs: Union[torch.Tensor, List[float], float], r: float = 1, method: str = 'standard', average: bool = True)-> torch.Tensor:
+        """
+        Implémentation stricte du 'pisa' (Functional Beamforming) de ton MATLAB.
+        
+        Args:
+            r (float): Paramètre de puissance.
+                    r=1  -> DAS.
+                    r=0  -> Midway.
+                    r>0 -> Pisarenko
+        """
+        # 1. Récupération des Steering Vectors [F, P, M]
+        a = self.get_steering_vectors(freqs)
+
+        norm = torch.linalg.vector_norm(a, dim=-1, keepdim=True)
+        a = a / norm
+        L, V = torch.linalg.eigh(csm)
+        L = torch.clamp(L, min=1e-12)
+        proj = torch.einsum('fpm,fmi->fpi', a.conj(), V)
+        if r != 0:
+            # On élève chaque valeur propre à la puissance 1/r
+
+            L_pow = L**(1/r)
+            
+            # 3. Reconstruction de la matrice de poids W
+            #W = torch.einsum('fmi,fi,fni->fmn', V, L_pow, V.conj())
+            
+            # 4. Calcul de la forme quadratique a^H * W * a
+            #quad_form = torch.einsum('fpi,fij,fpj->fp', a.conj(), W, a).real
+            quad_form = torch.einsum('fpi,fi,fpi->fp', proj, L_pow, proj.conj()).real
+            # 5. Puissance finale element-wise sur l'image
+            img= (quad_form**r)/self.probe.positions.shape[0]
+
+        else:
+            L_log = torch.log(L)
+            W = torch.einsum('fmi,fi,fni->fmn', V, L_log, V.conj())
+            log_form = torch.einsum('fpi,fij,fpj->fp', a.conj(), W, a).real
+            img = torch.exp(log_form)/self.probe.positions.shape[0]           
+
+        return self._format_output(img, average)
+--- END FILE: src\pycav\solvers\beamformers.py ---
+
+--- START FILE: src\pycav\solvers\preproc.py ---
+from __future__ import annotations
+from typing import Union, Tuple, Optional
+
+import torch
+import numpy as np
+
+
+@torch.no_grad()
+def compute_csm(raw: torch.Tensor, probe: Probe, K: int, overlap: float, f: Union[torch.Tensor, List[float], float], n_bin: int = 1, n_zp: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Calcule la Cross-Spectral Matrix (CSM) par la méthode des snapshots.
+    
+    Args:
+        raw: Tenseur [Nt, Ne] (Temps, Éléments)
+        probe.fs: Fréquence d'échantillonnage
+        K: Nombre de snapshots souhaités
+        overlap: Pourcentage de recouvrement (0.0 à 1.0)
+        f: Liste ou tenseur des fréquences de reconstruction
+        n_bin: Nombre de bins fréquentiels autour de f
+        n_zp: Nombre de points pour la FFT (Zero-padding)
+        
+    Returns:
+        CSM: [F, Ne, Ne] (Moyennée sur les snapshots)
+        axf: Fréquences réelles correspondant aux bins sélectionnés
+    """
+    if raw.dtype != torch.float32:
+        raw = raw.to(torch.float32)
+
+    fs=probe.fs
+    device = raw.device
+    Nt, Ne = raw.shape
+    f = torch.as_tensor(f, device=device, dtype=torch.float32)
+
+    # 1. Définition des variables de fenêtrage (Logique MATLAB)
+    nw = int(Nt // (K * (1 - overlap) + overlap))
+    lag = int(round((1 - overlap) * nw))
+    
+    # Calcul des indices de départ des snapshots
+    starts = torch.arange(0, Nt - nw + 1, lag, device=device)
+    n_snapshots = len(starts)
+
+    # 2. Gestion du Zero-Padding (Nzp)
+    if n_zp == 0:
+        delta_f = 0.01 * f.min()
+        n_zp = int(round(fs / delta_f.item()))
+        if n_zp < nw:
+            n_zp = nw
+            
+    # On arrondit à la puissance de 2 supérieure pour la vitesse FFT
+    n_zp = int(2**np.ceil(np.log2(n_zp)))
+
+    # 3. Identification des bins fréquentiels
+    vec_freq = torch.arange(n_zp, device=device,dtype=torch.float32) * (fs / n_zp)
+    
+    # Trouver les indices les plus proches des fréquences f
+    # On utilise broadcasting pour comparer toutes les fréquences d'un coup
+    diff = torch.abs(vec_freq.view(1, -1) - f.view(-1, 1))
+    idx_center = torch.argmin(diff, dim=1)
+    
+    # Gestion du multi-bin (n_bin)
+    if n_bin > 1:
+        offsets = torch.arange(-(n_bin // 2), n_bin // 2 + (n_bin % 2), device=device)
+        indices = idx_center.view(-1, 1) + offsets.view(1, -1)
+    else:
+        indices = idx_center.view(-1, 1)
+
+    # Fréquences réelles des bins
+    axf = vec_freq[indices]
+
+    # 4. Préparation de la fenêtre (Tukey/Hann)
+    # On utilise une fenêtre de Hann (proche du Tukey MATLAB par défaut)
+    win = torch.hann_window(nw, periodic=False, device=device, dtype=torch.float32).view(-1, 1)
+
+    # 5. Calcul des FFT par snapshots
+    # On va stocker les spectres complexes : [n_snapshots, n_freq_indices, Ne]
+    #tf_f = torch.zeros((n_snapshots, indices.numel(), Ne), dtype=torch.complex64, device=device)
+    '''
+    for i, start in enumerate(starts):
+        # Extraction du snapshot + application de la fenêtre
+        snapshot = raw[start : start + nw, :] * win
+        
+        # FFT sur n_zp points
+        full_fft = torch.fft.fft(snapshot, n=n_zp, dim=0)
+        
+        # On ne garde que les bins qui nous intéressent
+        # indices.flatten() contient tous les bins pour toutes les fréquences demandées
+        tf_f[i] = full_fft[indices.flatten(), :]'''
+    # raw shape: [Nt, Ne]
+    snapshots = raw.unfold(dimension=0, size=nw, step=lag) # [n_snapshots, Ne, nw]
+    snapshots = snapshots.permute(0, 2, 1) # [n_snapshots, nw, Ne]
+
+    # Application de la fenêtre (broadcast)
+    snapshots = snapshots * win.view(1, -1, 1)
+
+    # FFT sur tout le batch d'un coup ! 🔥
+    full_fft = torch.fft.fft(snapshots, n=n_zp, dim=1)
+
+    # Extraction des bins
+    tf_f = full_fft[:, indices.flatten(), :] # [n_snapshots, n_bins, Ne]
+
+    # 6. Calcul de la CSM : Moyenne de (X * X^H)
+    # X est [n_snapshots, n_bins, Ne]
+    # On veut CSM : [n_bins, Ne, Ne]
+    
+    # On réorganise pour le produit extérieur batché
+    # [n_bins, n_snapshots, Ne]
+    S = tf_f.transpose(0, 1)
+    
+    # Produit extérieur batché : (bin, snap, Ne, 1) x (bin, snap, 1, Ne)
+    # On moyenne sur la dimension 'snap' (n_snapshots)
+    csm_per_bin = torch.einsum('bse,bsm->bem', S, S.conj()) / n_snapshots
+    
+    # Si nBin > 1, on regroupe et on moyenne par fréquence cible
+    if n_bin > 1:
+        # On redimensionne : [F, nBin, Ne, Ne]
+        csm_reshaped = csm_per_bin.view(len(f), n_bin, Ne, Ne)
+        # On moyenne sur les bins pour chaque fréquence : [F, Ne, Ne]
+        csm_final = csm_reshaped.mean(dim=1)
+        # On prend la fréquence centrale pour le steering vector
+        axf_final = axf[:, n_bin // 2] 
+    else:
+        csm_final = csm_per_bin
+        axf_final = axf.flatten()
+
+    return csm_final, axf_final
+--- END FILE: src\pycav\solvers\preproc.py ---
+
+--- START FILE: src\pycav\utils\__init__.py ---
+from .decorators import validation_probe
+--- END FILE: src\pycav\utils\__init__.py ---
+
+--- START FILE: src\pycav\utils\decorators.py ---
+#This file contains the decorators needed for different tasks, such as verifications of the input and outputs
+from functools import wraps
+
+def validation_probe(func):
+    @wraps(func) 
+    def wrapper(self, *args, **kwargs):
+        # 1. On exécute l'init (ou la fonction décorée)
+        result = func(self, *args, **kwargs)
+        
+        # 2. On effectue les vérifications après l'assignation
+        if self.fs <= 0:
+            raise ValueError("The sampling frequency must be defined positive.")
+        
+        # 3. TRÈS IMPORTANT : On retourne le résultat
+        return result
+        
+    # 4. TRÈS IMPORTANT : On retourne l'objet fonction wrapper
+    return wrapper
+--- END FILE: src\pycav\utils\decorators.py ---
+
+--- START FILE: src\pycav\utils\io.py ---
+import scipy.io as sio
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+def load_verasonics_data(file_path):
+    """
+    Charge un fichier .mat exporté par Verasonics.
+    Retourne un dictionnaire avec les objets convertis en Python/Numpy.
+    """
+    mat_data = sio.loadmat(file_path, squeeze_me=True, struct_as_record=False)
+    
+    # mat_data contient généralement : Trans, P, RcvData, etc.
+    return mat_data
+
+def get_rf_data(mat_data, buffer_idx=0):
+    """
+    Extrait les signaux RF du buffer RcvData.
+    Retourne un tenseur [Nt, Ne].
+    """
+    # Verasonics stocke souvent les données en int16 dans une liste de tableaux
+    rf = mat_data['RcvData'][buffer_idx]
+    return torch.from_numpy(rf.astype(np.float32))
+
+def plot_rf_matrix(dirac_rf, fs, title="Données RF"):
+    n_samples, nelem = dirac_rf.shape
+    t_max = (n_samples / fs) * 1e6
+    
+    plt.figure(figsize=(8, 6))
+    # aspect='auto' est vital car n_samples >> nelem
+    plt.imshow(dirac_rf.cpu().numpy(), 
+               extent=[0, nelem, t_max, 0], 
+               aspect='auto', 
+               cmap='RdBu') # RdBu est top pour voir le balancement phase +/-
+    plt.title(title)
+    plt.ylabel("Temps (µs)")
+    plt.xlabel("Index de l'élément")
+    plt.colorbar(label="Amplitude")
+   # plt.show()
+
+
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_rf_spectrum(rf_line, fs, f0=None, title="Spectre du signal RF"):
+    """
+    Calcule et affiche la PSD d'une ligne RF.
+    rf_line : Tensor (n_samples,) ou ndarray
+    fs : Fréquence d'échantillonnage (Hz)
+    f0 : Fréquence centrale (Hz) pour marquer les harmoniques (optionnel)
+    """
+    if torch.is_tensor(rf_line):
+        rf_line = rf_line.detach().cpu().numpy()
+    
+    n = len(rf_line)
+    # Utilisation de rfft pour les signaux réels
+    fft_values = np.fft.rfft(rf_line)
+    freqs = np.fft.rfftfreq(n, d=1/fs)
+    
+    # Calcul de la magnitude normalisée en dB
+    magnitude = np.abs(fft_values)
+    psd_db = 20 * np.log10(magnitude / (np.max(magnitude) + 1e-10))
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(freqs / 1e6, psd_db, color='tab:blue', linewidth=1)
+    
+    # Marquage des raies théoriques si f0 est fourni
+    if f0 is not None:
+        f0_mhz = f0 / 1e6
+        harmonics = [f0_mhz/2, f0_mhz, 1.5*f0_mhz, 2*f0_mhz, 2.5*f0_mhz, 3*f0_mhz]
+        labels = ['f0/2', 'f0', '1.5f0', '2f0', '2.5f0', '3f0']
+        
+        for h, label in zip(harmonics, labels):
+            plt.axvline(x=h, color='tab:red', linestyle='--', alpha=0.5)
+            plt.text(h, plt.ylim()[1], label, color='tab:red', 
+                     rotation=90, va='bottom', ha='center', fontsize=8)
+
+    plt.title(title)
+    plt.xlabel("Fréquence (MHz)")
+    plt.ylabel("Magnitude (dB)")
+    plt.xlim(0, freqs.max() / 1e6 if freqs.max() < 10e6 else 10) # Zoom par défaut sur 5MHz
+    plt.ylim(-100, 5)
+    plt.grid(True, which='both', alpha=0.3)
+    plt.tight_layout()
+    #plt.show()
+
+def plot_result(img, grid, title):
+    # Sécurité : si l'image a encore la dimension des fréquences [F, Nx, Nz], on fait la moyenne
+    if img.ndim == 3:
+        img = img.mean(dim=0)
+    # Rétro-compatibilité : si l'utilisateur donne un vieux vecteur 1D
+    elif img.ndim == 1:
+        img = img.view(*grid.shape)
+
+    img_2d = img.detach().cpu().numpy()
+    
+    plt.imshow(img_2d.T, extent=[grid.x.min()*1e3, grid.x.max()*1e3, grid.z.max()*1e3, grid.z.min()*1e3], cmap='hot', origin="upper")
+    plt.colorbar(label='Intensité')
+    plt.title(title)
+    plt.xlabel("X (mm)")
+    plt.ylabel("Z (mm)")
+
+
+
+def plot_result_dB(img, grid, title, dynamic_range=20):
+
+
+    # Source - https://stackoverflow.com/a/60007513
+# Posted by PetSven
+# Retrieved 2026-04-01, License - CC BY-SA 4.0
+
+    cm_data = [[0.2422, 0.1504, 0.6603],
+            [0.2444, 0.1534, 0.6728],
+            [0.2464, 0.1569, 0.6847],
+            [0.2484, 0.1607, 0.6961],
+            [0.2503, 0.1648, 0.7071],
+            [0.2522, 0.1689, 0.7179],
+            [0.254, 0.1732, 0.7286],
+            [0.2558, 0.1773, 0.7393],
+            [0.2576, 0.1814, 0.7501],
+            [0.2594, 0.1854, 0.761],
+            [0.2611, 0.1893, 0.7719],
+            [0.2628, 0.1932, 0.7828],
+            [0.2645, 0.1972, 0.7937],
+            [0.2661, 0.2011, 0.8043],
+            [0.2676, 0.2052, 0.8148],
+            [0.2691, 0.2094, 0.8249],
+            [0.2704, 0.2138, 0.8346],
+            [0.2717, 0.2184, 0.8439],
+            [0.2729, 0.2231, 0.8528],
+            [0.274, 0.228, 0.8612],
+            [0.2749, 0.233, 0.8692],
+            [0.2758, 0.2382, 0.8767],
+            [0.2766, 0.2435, 0.884],
+            [0.2774, 0.2489, 0.8908],
+            [0.2781, 0.2543, 0.8973],
+            [0.2788, 0.2598, 0.9035],
+            [0.2794, 0.2653, 0.9094],
+            [0.2798, 0.2708, 0.915],
+            [0.2802, 0.2764, 0.9204],
+            [0.2806, 0.2819, 0.9255],
+            [0.2809, 0.2875, 0.9305],
+            [0.2811, 0.293, 0.9352],
+            [0.2813, 0.2985, 0.9397],
+            [0.2814, 0.304, 0.9441],
+            [0.2814, 0.3095, 0.9483],
+            [0.2813, 0.315, 0.9524],
+            [0.2811, 0.3204, 0.9563],
+            [0.2809, 0.3259, 0.96],
+            [0.2807, 0.3313, 0.9636],
+            [0.2803, 0.3367, 0.967],
+            [0.2798, 0.3421, 0.9702],
+            [0.2791, 0.3475, 0.9733],
+            [0.2784, 0.3529, 0.9763],
+            [0.2776, 0.3583, 0.9791],
+            [0.2766, 0.3638, 0.9817],
+            [0.2754, 0.3693, 0.984],
+            [0.2741, 0.3748, 0.9862],
+            [0.2726, 0.3804, 0.9881],
+            [0.271, 0.386, 0.9898],
+            [0.2691, 0.3916, 0.9912],
+            [0.267, 0.3973, 0.9924],
+            [0.2647, 0.403, 0.9935],
+            [0.2621, 0.4088, 0.9946],
+            [0.2591, 0.4145, 0.9955],
+            [0.2556, 0.4203, 0.9965],
+            [0.2517, 0.4261, 0.9974],
+            [0.2473, 0.4319, 0.9983],
+            [0.2424, 0.4378, 0.9991],
+            [0.2369, 0.4437, 0.9996],
+            [0.2311, 0.4497, 0.9995],
+            [0.225, 0.4559, 0.9985],
+            [0.2189, 0.462, 0.9968],
+            [0.2128, 0.4682, 0.9948],
+            [0.2066, 0.4743, 0.9926],
+            [0.2006, 0.4803, 0.9906],
+            [0.195, 0.4861, 0.9887],
+            [0.1903, 0.4919, 0.9867],
+            [0.1869, 0.4975, 0.9844],
+            [0.1847, 0.503, 0.9819],
+            [0.1831, 0.5084, 0.9793],
+            [0.1818, 0.5138, 0.9766],
+            [0.1806, 0.5191, 0.9738],
+            [0.1795, 0.5244, 0.9709],
+            [0.1785, 0.5296, 0.9677],
+            [0.1778, 0.5349, 0.9641],
+            [0.1773, 0.5401, 0.9602],
+            [0.1768, 0.5452, 0.956],
+            [0.1764, 0.5504, 0.9516],
+            [0.1755, 0.5554, 0.9473],
+            [0.174, 0.5605, 0.9432],
+            [0.1716, 0.5655, 0.9393],
+            [0.1686, 0.5705, 0.9357],
+            [0.1649, 0.5755, 0.9323],
+            [0.161, 0.5805, 0.9289],
+            [0.1573, 0.5854, 0.9254],
+            [0.154, 0.5902, 0.9218],
+            [0.1513, 0.595, 0.9182],
+            [0.1492, 0.5997, 0.9147],
+            [0.1475, 0.6043, 0.9113],
+            [0.1461, 0.6089, 0.908],
+            [0.1446, 0.6135, 0.905],
+            [0.1429, 0.618, 0.9022],
+            [0.1408, 0.6226, 0.8998],
+            [0.1383, 0.6272, 0.8975],
+            [0.1354, 0.6317, 0.8953],
+            [0.1321, 0.6363, 0.8932],
+            [0.1288, 0.6408, 0.891],
+            [0.1253, 0.6453, 0.8887],
+            [0.1219, 0.6497, 0.8862],
+            [0.1185, 0.6541, 0.8834],
+            [0.1152, 0.6584, 0.8804],
+            [0.1119, 0.6627, 0.877],
+            [0.1085, 0.6669, 0.8734],
+            [0.1048, 0.671, 0.8695],
+            [0.1009, 0.675, 0.8653],
+            [0.0964, 0.6789, 0.8609],
+            [0.0914, 0.6828, 0.8562],
+            [0.0855, 0.6865, 0.8513],
+            [0.0789, 0.6902, 0.8462],
+            [0.0713, 0.6938, 0.8409],
+            [0.0628, 0.6972, 0.8355],
+            [0.0535, 0.7006, 0.8299],
+            [0.0433, 0.7039, 0.8242],
+            [0.0328, 0.7071, 0.8183],
+            [0.0234, 0.7103, 0.8124],
+            [0.0155, 0.7133, 0.8064],
+            [0.0091, 0.7163, 0.8003],
+            [0.0046, 0.7192, 0.7941],
+            [0.0019, 0.722, 0.7878],
+            [0.0009, 0.7248, 0.7815],
+            [0.0018, 0.7275, 0.7752],
+            [0.0046, 0.7301, 0.7688],
+            [0.0094, 0.7327, 0.7623],
+            [0.0162, 0.7352, 0.7558],
+            [0.0253, 0.7376, 0.7492],
+            [0.0369, 0.74, 0.7426],
+            [0.0504, 0.7423, 0.7359],
+            [0.0638, 0.7446, 0.7292],
+            [0.077, 0.7468, 0.7224],
+            [0.0899, 0.7489, 0.7156],
+            [0.1023, 0.751, 0.7088],
+            [0.1141, 0.7531, 0.7019],
+            [0.1252, 0.7552, 0.695],
+            [0.1354, 0.7572, 0.6881],
+            [0.1448, 0.7593, 0.6812],
+            [0.1532, 0.7614, 0.6741],
+            [0.1609, 0.7635, 0.6671],
+            [0.1678, 0.7656, 0.6599],
+            [0.1741, 0.7678, 0.6527],
+            [0.1799, 0.7699, 0.6454],
+            [0.1853, 0.7721, 0.6379],
+            [0.1905, 0.7743, 0.6303],
+            [0.1954, 0.7765, 0.6225],
+            [0.2003, 0.7787, 0.6146],
+            [0.2061, 0.7808, 0.6065],
+            [0.2118, 0.7828, 0.5983],
+            [0.2178, 0.7849, 0.5899],
+            [0.2244, 0.7869, 0.5813],
+            [0.2318, 0.7887, 0.5725],
+            [0.2401, 0.7905, 0.5636],
+            [0.2491, 0.7922, 0.5546],
+            [0.2589, 0.7937, 0.5454],
+            [0.2695, 0.7951, 0.536],
+            [0.2809, 0.7964, 0.5266],
+            [0.2929, 0.7975, 0.517],
+            [0.3052, 0.7985, 0.5074],
+            [0.3176, 0.7994, 0.4975],
+            [0.3301, 0.8002, 0.4876],
+            [0.3424, 0.8009, 0.4774],
+            [0.3548, 0.8016, 0.4669],
+            [0.3671, 0.8021, 0.4563],
+            [0.3795, 0.8026, 0.4454],
+            [0.3921, 0.8029, 0.4344],
+            [0.405, 0.8031, 0.4233],
+            [0.4184, 0.803, 0.4122],
+            [0.4322, 0.8028, 0.4013],
+            [0.4463, 0.8024, 0.3904],
+            [0.4608, 0.8018, 0.3797],
+            [0.4753, 0.8011, 0.3691],
+            [0.4899, 0.8002, 0.3586],
+            [0.5044, 0.7993, 0.348],
+            [0.5187, 0.7982, 0.3374],
+            [0.5329, 0.797, 0.3267],
+            [0.547, 0.7957, 0.3159],
+            [0.5609, 0.7943, 0.305],
+            [0.5748, 0.7929, 0.2941],
+            [0.5886, 0.7913, 0.2833],
+            [0.6024, 0.7896, 0.2726],
+            [0.6161, 0.7878, 0.2622],
+            [0.6297, 0.7859, 0.2521],
+            [0.6433, 0.7839, 0.2423],
+            [0.6567, 0.7818, 0.2329],
+            [0.6701, 0.7796, 0.2239],
+            [0.6833, 0.7773, 0.2155],
+            [0.6963, 0.775, 0.2075],
+            [0.7091, 0.7727, 0.1998],
+            [0.7218, 0.7703, 0.1924],
+            [0.7344, 0.7679, 0.1852],
+            [0.7468, 0.7654, 0.1782],
+            [0.759, 0.7629, 0.1717],
+            [0.771, 0.7604, 0.1658],
+            [0.7829, 0.7579, 0.1608],
+            [0.7945, 0.7554, 0.157],
+            [0.806, 0.7529, 0.1546],
+            [0.8172, 0.7505, 0.1535],
+            [0.8281, 0.7481, 0.1536],
+            [0.8389, 0.7457, 0.1546],
+            [0.8495, 0.7435, 0.1564],
+            [0.86, 0.7413, 0.1587],
+            [0.8703, 0.7392, 0.1615],
+            [0.8804, 0.7372, 0.165],
+            [0.8903, 0.7353, 0.1695],
+            [0.9, 0.7336, 0.1749],
+            [0.9093, 0.7321, 0.1815],
+            [0.9184, 0.7308, 0.189],
+            [0.9272, 0.7298, 0.1973],
+            [0.9357, 0.729, 0.2061],
+            [0.944, 0.7285, 0.2151],
+            [0.9523, 0.7284, 0.2237],
+            [0.9606, 0.7285, 0.2312],
+            [0.9689, 0.7292, 0.2373],
+            [0.977, 0.7304, 0.2418],
+            [0.9842, 0.733, 0.2446],
+            [0.99, 0.7365, 0.2429],
+            [0.9946, 0.7407, 0.2394],
+            [0.9966, 0.7458, 0.2351],
+            [0.9971, 0.7513, 0.2309],
+            [0.9972, 0.7569, 0.2267],
+            [0.9971, 0.7626, 0.2224],
+            [0.9969, 0.7683, 0.2181],
+            [0.9966, 0.774, 0.2138],
+            [0.9962, 0.7798, 0.2095],
+            [0.9957, 0.7856, 0.2053],
+            [0.9949, 0.7915, 0.2012],
+            [0.9938, 0.7974, 0.1974],
+            [0.9923, 0.8034, 0.1939],
+            [0.9906, 0.8095, 0.1906],
+            [0.9885, 0.8156, 0.1875],
+            [0.9861, 0.8218, 0.1846],
+            [0.9835, 0.828, 0.1817],
+            [0.9807, 0.8342, 0.1787],
+            [0.9778, 0.8404, 0.1757],
+            [0.9748, 0.8467, 0.1726],
+            [0.972, 0.8529, 0.1695],
+            [0.9694, 0.8591, 0.1665],
+            [0.9671, 0.8654, 0.1636],
+            [0.9651, 0.8716, 0.1608],
+            [0.9634, 0.8778, 0.1582],
+            [0.9619, 0.884, 0.1557],
+            [0.9608, 0.8902, 0.1532],
+            [0.9601, 0.8963, 0.1507],
+            [0.9596, 0.9023, 0.148],
+            [0.9595, 0.9084, 0.145],
+            [0.9597, 0.9143, 0.1418],
+            [0.9601, 0.9203, 0.1382],
+            [0.9608, 0.9262, 0.1344],
+            [0.9618, 0.932, 0.1304],
+            [0.9629, 0.9379, 0.1261],
+            [0.9642, 0.9437, 0.1216],
+            [0.9657, 0.9494, 0.1168],
+            [0.9674, 0.9552, 0.1116],
+            [0.9692, 0.9609, 0.1061],
+            [0.9711, 0.9667, 0.1001],
+            [0.973, 0.9724, 0.0938],
+            [0.9749, 0.9782, 0.0872],
+            [0.9769, 0.9839, 0.0805]]
+
+    parula_map = LinearSegmentedColormap.from_list('parula', cm_data)
+
+    # Sécurité : si l'image a la dimension des fréquences [F, Nx, Nz], on fait la moyenne
+    if img.ndim == 3:
+        img = img.mean(dim=0)
+    elif img.ndim == 1:
+        img = img.view(*grid.shape)
+
+    # 1. Extraction propre du tenseur vers NumPy
+    img_np = img.detach().cpu().numpy()
+    
+    # 2. Rescale et conversion dB
+    img_rescale = (img_np - np.min(img_np)) / (np.max(img_np) - np.min(img_np))
+    img_safe = np.clip(img_rescale, 1e-12, None) # Évite log(0)
+    img_db_norm = 10 * np.log10(img_safe / np.max(img_safe))
+    
+    # 3. Affichage direct (img_db_norm est déjà 2D de taille [Nx, Nz])
+    plt.imshow(img_db_norm.T, extent=[grid.x.min()*1e3, grid.x.max()*1e3, grid.z.max()*1e3, grid.z.min()*1e3], cmap=parula_map, 
+               vmin=-dynamic_range, vmax=0, origin="upper")
+               
+    plt.colorbar(label='Intensité (dB)')
+    plt.title(title)
+    plt.xlabel("X (mm)")
+    plt.ylabel("Z (mm)")
+    
+--- END FILE: src\pycav\utils\io.py ---
+
+--- START FILE: src\PyCav.egg-info\dependency_links.txt ---
+
+
+--- END FILE: src\PyCav.egg-info\dependency_links.txt ---
+
+--- START FILE: src\PyCav.egg-info\requires.txt ---
+deepinv>=0.3.7
+pandas
+scipy
+
+--- END FILE: src\PyCav.egg-info\requires.txt ---
+
+--- START FILE: src\PyCav.egg-info\SOURCES.txt ---
+README.md
+pyproject.toml
+src/PyCav.egg-info/PKG-INFO
+src/PyCav.egg-info/SOURCES.txt
+src/PyCav.egg-info/dependency_links.txt
+src/PyCav.egg-info/requires.txt
+src/PyCav.egg-info/top_level.txt
+src/pycav/__init__.py
+src/pycav/core/Grid.py
+src/pycav/core/Probe.py
+src/pycav/core/__init__.py
+src/pycav/core/grid.py
+src/pycav/core/probe.py
+src/pycav/io/__init__.py
+src/pycav/physics/__init__.py
+src/pycav/physics/propagation.py
+src/pycav/simulation/simulation.py
+src/pycav/solvers/__init__.py
+src/pycav/solvers/beamformers.py
+src/pycav/solvers/preproc.py
+src/pycav/solvers/priors.py
+src/pycav/utils/__init__.py
+src/pycav/utils/decorators.py
+src/pycav/utils/io.py
+tests/test_pipeline.py
+tests/test_simulation_convolution.py
+tests/test_simulation_geometry.py
+--- END FILE: src\PyCav.egg-info\SOURCES.txt ---
+
+--- START FILE: src\PyCav.egg-info\top_level.txt ---
+pycav
+
+--- END FILE: src\PyCav.egg-info\top_level.txt ---
+
+--- START FILE: tests\__init__.py ---
+
+--- END FILE: tests\__init__.py ---
+
+--- START FILE: tests\test_pipeline.py ---
+import pytest
+import torch
+from pycav.core.probe import Probe
+from pycav.core.grid import Grid
+from pycav.simulation.simulation import StableSimulator, BBagSimulator
+from pycav.solvers.preproc import compute_csm
+from pycav.solvers.beamformers import DAS, RCB, RCB_Li, FB
+
+# ---------------------------------------------------------
+# FIXTURES : Objets partagés créés avant chaque test
+# ---------------------------------------------------------
+@pytest.fixture
+def device():
+    # On teste sur CPU pour garantir que les tests passent sur n'importe quelle machine
+    return "cpu"
+
+@pytest.fixture
+def probe(device):
+    # Sonde miniature pour des tests rapides (32 éléments)
+    return Probe.from_linear(n_el=32, pitch=0.3e-3, fs=20e6, device=device)
+
+@pytest.fixture
+def grid(device):
+    # Grille minuscule (10x10 pixels = 100 positions)
+    return Grid.from_limits(x_lim=(-0.005, 0.005), z_lim=(0.01, 0.02), step=0.001, device=device)
+
+@pytest.fixture
+def dummy_rf(probe):
+    # Faux signal RF de 1000 samples
+    n_samples = 1000
+    return torch.randn(n_samples, probe.n_elements, dtype=torch.float32, device=probe.device)
+
+@pytest.fixture
+def dummy_csm(probe):
+    # Fausse CSM théorique (Produit extérieur d'un vecteur aléatoire)
+    # Shape attendue par les solvers: [F, Ne, Ne] -> On prend F=1
+    x = torch.randn(probe.n_elements, dtype=torch.complex64, device=probe.device)
+    csm = torch.outer(x, x.conj()).unsqueeze(0) 
+    return csm
+
+# ---------------------------------------------------------
+# 1. TESTS CORE
+# ---------------------------------------------------------
+def test_probe_creation(probe):
+    assert probe.n_elements == 32
+    assert probe.positions.shape == (32, 3)
+    assert probe.positions.dtype == torch.float32
+    assert probe.fc.dtype == torch.float32
+
+def test_grid_creation(grid):
+    # 10x10 pixels (environ, selon le step), l'important est la dimension finale
+    n_pixels = grid.n_pixels
+    assert grid.positions.shape == (n_pixels, 3)
+    assert grid.positions.dtype == torch.float32
+
+# ---------------------------------------------------------
+# 2. TESTS SIMULATION
+# ---------------------------------------------------------
+def test_bbag_simulator(probe, device):
+    bubble_pos = torch.tensor([[0.0, 0.0, 0.015]], dtype=torch.float32, device=device)
+    sim = BBagSimulator(probe, bubble_pos, fhifu=1e6, device=device)
+    
+    rf = sim.simulate(t_acq=50e-6, n_cycles=10, apply_filter=True)
+    
+    n_samples_expected = int(50e-6 * probe.fs)
+    assert rf.shape == (n_samples_expected, probe.n_elements)
+    assert rf.dtype == torch.float32
+
+def test_stable_simulator(probe, device):
+    bubble_pos = torch.tensor([[0.0, 0.0, 0.015]], dtype=torch.float32, device=device)
+    sim = StableSimulator(probe, bubble_pos, fhifu=1e6, device=device)
+    
+    rf = sim.simulate(t_acq=50e-6, n_cycles=10, apply_filter=True)
+    
+    n_samples_expected = int(50e-6 * probe.fs)
+    assert rf.shape == (n_samples_expected, probe.n_elements)
+    assert rf.dtype == torch.float32
+
+# ---------------------------------------------------------
+# 3. TESTS PREPROC (CSM)
+# ---------------------------------------------------------
+def test_compute_csm(dummy_rf, probe):
+    f_target = 5e6
+    csm, axf = compute_csm(dummy_rf, probe, K=5, overlap=0.5, f=[f_target])
+    
+    # Doit renvoyer [F=1, Ne=32, Ne=32]
+    assert csm.shape == (1, probe.n_elements, probe.n_elements)
+    assert csm.dtype == torch.complex64
+    assert axf.dtype == torch.float32
+
+# ---------------------------------------------------------
+# 4. TESTS SOLVERS
+# ---------------------------------------------------------
+@pytest.mark.parametrize("SolverClass", [DAS, RCB, RCB_Li, FB])
+def test_solvers(SolverClass, probe, grid, dummy_csm):
+    solver = SolverClass(probe, grid, c=1540.0)
+    
+    freqs = [5e6]
+    img = solver.solve(dummy_csm, freqs)
+    
+    # L'image finale (moyennée sur les fréquences) doit avoir la taille du nombre de pixels
+    assert img.shape == grid.shape
+    assert img.dtype == torch.float32
+    
+    # Vérifie qu'aucune instabilité mathématique n'a produit de NaN ou d'Inf
+    assert not torch.isnan(img).any(), f"NaN detected in {SolverClass.__name__} output"
+    assert not torch.isinf(img).any(), f"Inf detected in {SolverClass.__name__} output"
+--- END FILE: tests\test_pipeline.py ---
+

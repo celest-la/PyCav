@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "PyCav"
+version = "0.1.0"
+description = "PyCav is a project aiming to group tools for Passive cavitation imaging, spanning from simulations of RF signals to reconstruction with diverse methods."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0.0",
+    "numpy",
+    "scipy",
+    "matplotlib"
+]
+
+[project.optional-dependencies]
+# Permet d'installer les outils de test avec: uv pip install -e ".[dev]"
+dev = [
+    "pytest"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+
+# Force CPU, comment for GPU usage
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
