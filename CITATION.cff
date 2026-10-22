@@ -1,0 +1,10 @@
+cff-version: 1.0.0
+message: "If you use this software in your research, please cite it as below."
+authors:
+  - family-names: "Lachambre"
+    given-names: "Celestine"
+    # orcid: "https://orcid.org/0000-0000-0000-0000" 
+title: "PyCav: HGPU Accelerated Passive Cavitation Imaging in PyTorch"
+version: 0.1.0
+date-released: 2026-10-22
+url: "https://github.com/celest-la/PyCav"

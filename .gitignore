@@ -13,3 +13,4 @@ wheels/
 Dockerfile
 .dockerignore
 uv.lock
+export_files.py

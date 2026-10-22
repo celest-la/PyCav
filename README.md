@@ -53,4 +53,17 @@ There are 2 demos, for 3D et 2D reconstruction.
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
+## 📝 Citation
+
+If you use PyCav in your research, please cite it using the following BibTeX entry:
+
+```bibtex
+@software{PyCav2026,
+  author = {Lachambre, Celestine},
+  title = {PyCav: GPU-accelerated Passive Cavitation Imaging in PyTorch},
+  year = {2026},
+  url = {[https://github.com/celest-la/PyCav](https://github.com/celest-la/PyCav)},
+  version = {0.1.0}
+}
+
 ***
